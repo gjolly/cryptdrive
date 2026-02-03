@@ -1,0 +1,9 @@
+- Steam encryption process to avoid loading large files into memory
+- Enforce file size limits on uploads and quota limits based on user tier
+- Redirect to R2 signed URLs for uploads and downloads instead of proxying through the worker
+- Securely manage sensitive environment variables like SERVER_PEPPER and JWT_SECRET
+- Show tier 0 (free) limitations in the UI - especially the retention period for 24h
+- Apply linting and formatting standards across the codebase
+- Develop a CI (Github and Cloudflare worker integration) pipeline for automated testing and deployment
+- Put API on /api path to allow the frontend to use a wider range of paths without conflicting with API routes (e.g., /file/{file_id} for file download)
+- Review the use of the public key vs user ID in the authentication and rate limiting logic to ensure consistency and security

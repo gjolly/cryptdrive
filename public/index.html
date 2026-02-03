@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>CryptDrive - End-to-End Encrypted Storage</title>
+		<link rel="stylesheet" href="https://cdn.simplecss.org/simple.min.css" />
+		<style>
+			.hidden {
+				display: none;
+			}
+			.file-item {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				padding: 0.5rem;
+				border: 1px solid var(--border);
+				margin-bottom: 0.5rem;
+				border-radius: 4px;
+			}
+			.file-item:hover {
+				background-color: var(--accent-bg);
+			}
+			.error {
+				color: var(--red);
+				padding: 1rem;
+				border: 1px solid var(--red);
+				border-radius: 4px;
+				margin-bottom: 1rem;
+			}
+			.success {
+				color: var(--green);
+				padding: 1rem;
+				border: 1px solid var(--green);
+				border-radius: 4px;
+				margin-bottom: 1rem;
+			}
+			.loading {
+				text-align: center;
+				padding: 2rem;
+			}
+		</style>
+	</head>
+	<body>
+		<header>
+			<h1>🔒 CryptDrive</h1>
+			<p>End-to-End Encrypted Storage</p>
+		</header>
+
+		<main>
+			<!-- Landing Page -->
+			<section id="landingPage">
+				<h2>Welcome</h2>
+				<p>Your files, encrypted on your device. The server never sees your data.</p>
+				<button onclick="showRegister()">Create Account</button>
+				<button onclick="showLogin()">Login</button>
+			</section>
+
+			<!-- Register Page -->
+			<section id="registerPage" class="hidden">
+				<h2>Create Account</h2>
+				<div id="registerError" class="error hidden"></div>
+				<form onsubmit="handleRegister(event)">
+					<label for="regUsername">Username</label>
+					<input type="text" id="regUsername" required autocomplete="username" />
+
+					<label for="regPassphrase">Passphrase (min 12 characters)</label>
+					<input type="password" id="regPassphrase" required minlength="12" autocomplete="new-password" />
+
+					<button type="submit" id="registerBtn">Create Account</button>
+					<button type="button" onclick="showLanding()">Cancel</button>
+				</form>
+			</section>
+
+			<!-- Login Page -->
+			<section id="loginPage" class="hidden">
+				<h2>Login</h2>
+				<div id="loginError" class="error hidden"></div>
+				<form onsubmit="handleLogin(event)">
+					<label for="loginUsername">Username</label>
+					<input type="text" id="loginUsername" required autocomplete="username" />
+
+					<label for="loginPassphrase">Passphrase</label>
+					<input type="password" id="loginPassphrase" required autocomplete="current-password" />
+
+					<button type="submit" id="loginBtn">Login</button>
+					<button type="button" onclick="showLanding()">Cancel</button>
+				</form>
+			</section>
+
+			<!-- Files Page -->
+			<section id="filesPage" class="hidden">
+				<div style="display: flex; justify-content: space-between; align-items: center">
+					<h2>Your Files</h2>
+					<button onclick="logout()">Logout</button>
+				</div>
+
+				<div id="filesSuccess" class="success hidden"></div>
+				<div id="filesError" class="error hidden"></div>
+
+				<!-- Upload Form -->
+				<details>
+					<summary>Upload New File</summary>
+					<form onsubmit="handleUpload(event)">
+						<label for="fileInput">Choose File</label>
+						<input type="file" id="fileInput" required />
+						<button type="submit" id="uploadBtn">Upload</button>
+					</form>
+				</details>
+
+				<!-- Files List -->
+				<div id="filesLoading" class="loading hidden">Loading files...</div>
+				<div id="filesList"></div>
+			</section>
+		</main>
+
+		<footer>
+			<p>All encryption happens in your browser. Your data is never exposed to the server.</p>
+		</footer>
+
+		<!-- Crypto Libraries -->
+		<script src="https://cdn.jsdelivr.net/npm/argon2-browser@1.18.0/dist/argon2-bundled.min.js"></script>
+		<script type="module">
+			// Import Ed25519 library
+			import * as nobleEd25519 from 'https://cdn.jsdelivr.net/npm/@noble/ed25519@2.0.0/+esm';
+
+			// Set up sha512 using Web Crypto API (browser native)
+			nobleEd25519.etc.sha512Sync = (...messages) => {
+				const message = nobleEd25519.etc.concatBytes(...messages);
+				// For sync, we'll use a polyfill approach
+				throw new Error('Use async methods only');
+			};
+			nobleEd25519.etc.sha512Async = async (...messages) => {
+				const message = nobleEd25519.etc.concatBytes(...messages);
+				const hash = await crypto.subtle.digest('SHA-512', message);
+				return new Uint8Array(hash);
+			};
+
+			// Configuration
+			const API_BASE = window.location.origin;
+
+			// Load session from localStorage if available
+			function loadSession() {
+				const stored = localStorage.getItem('cryptdrive_session');
+				if (stored) {
+					try {
+						const parsed = JSON.parse(stored);
+						// Convert base64 strings back to Uint8Arrays
+						if (parsed.keychainKey) parsed.keychainKey = base64ToArray(parsed.keychainKey);
+						if (parsed.privateKey) parsed.privateKey = base64ToArray(parsed.privateKey);
+						if (parsed.publicKey) parsed.publicKey = base64ToArray(parsed.publicKey);
+						return parsed;
+					} catch (e) {
+						console.error('Failed to load session:', e);
+						localStorage.removeItem('cryptdrive_session');
+					}
+				}
+				return {
+					userId: null,
+					keychainId: null,
+					token: null,
+					keychainKey: null,
+					privateKey: null,
+					publicKey: null,
+					keychain: null,
+				};
+			}
+
+			// Save session to localStorage
+			function saveSession() {
+				try {
+					const toStore = { ...session };
+					// Convert Uint8Arrays to base64 for storage
+					if (toStore.keychainKey) toStore.keychainKey = arrayToBase64(toStore.keychainKey);
+					if (toStore.privateKey) toStore.privateKey = arrayToBase64(toStore.privateKey);
+					if (toStore.publicKey) toStore.publicKey = arrayToBase64(toStore.publicKey);
+					localStorage.setItem('cryptdrive_session', JSON.stringify(toStore));
+				} catch (e) {
+					console.error('Failed to save session:', e);
+				}
+			}
+
+			// Session state
+			let session = loadSession();
+
+			// ===== UI Navigation =====
+
+			function showSection(sectionId) {
+				['landingPage', 'registerPage', 'loginPage', 'filesPage'].forEach((id) => {
+					document.getElementById(id).classList.add('hidden');
+				});
+				document.getElementById(sectionId).classList.remove('hidden');
+			}
+
+			function showLanding() {
+				showSection('landingPage');
+			}
+			function showRegister() {
+				showSection('registerPage');
+			}
+			function showLogin() {
+				showSection('loginPage');
+			}
+
+			function showError(elementId, message) {
+				const el = document.getElementById(elementId);
+				el.textContent = message;
+				el.classList.remove('hidden');
+				setTimeout(() => el.classList.add('hidden'), 5000);
+			}
+
+			function showSuccess(elementId, message) {
+				const el = document.getElementById(elementId);
+				el.textContent = message;
+				el.classList.remove('hidden');
+				setTimeout(() => el.classList.add('hidden'), 3000);
+			}
+
+			// ===== Cryptographic Functions =====
+
+			async function deriveMasterKey(passphrase, username) {
+				// Convert username to Uint8Array and ensure it's at least 8 bytes (Argon2 requirement)
+				const encoder = new TextEncoder();
+				let saltBytes = encoder.encode(username);
+
+				// Pad to at least 8 bytes if needed
+				if (saltBytes.length < 8) {
+					const padded = new Uint8Array(8);
+					padded.set(saltBytes);
+					saltBytes = padded;
+				}
+
+				const result = await argon2.hash({
+					pass: passphrase,
+					salt: saltBytes,
+					time: 3,
+					mem: 65536,
+					hashLen: 32,
+					parallelism: 4,
+					type: argon2.ArgonType.Argon2id,
+				});
+				return result.hash;
+			}
+
+			async function hkdf(masterKey, info, length = 32) {
+				const ikm = masterKey;
+				const salt = new Uint8Array(0);
+				const infoBytes = new TextEncoder().encode(info);
+
+				const key = await crypto.subtle.importKey('raw', ikm, { name: 'HKDF' }, false, ['deriveBits']);
+
+				const bits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: infoBytes }, key, length * 8);
+
+				return new Uint8Array(bits);
+			}
+
+			async function deriveKeys(passphrase, username) {
+				const masterKey = await deriveMasterKey(passphrase, username);
+				const authSeed = await hkdf(masterKey, 'auth-v1');
+				const keychainKey = await hkdf(masterKey, 'keychain-v1');
+				const keychainIdSeed = await hkdf(masterKey, 'keychain-id-v1', 16);
+
+				const privateKey = authSeed;
+				const publicKey = await nobleEd25519.getPublicKeyAsync(privateKey);
+
+				// Derive keychain_id as a UUID-like string from keychainIdSeed
+				const hex = Array.from(keychainIdSeed)
+					.map((b) => b.toString(16).padStart(2, '0'))
+					.join('');
+				const keychainId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+
+				return { privateKey, publicKey, keychainKey, keychainId };
+			}
+
+			function arrayToBase64(array) {
+				return btoa(String.fromCharCode(...array));
+			}
+
+			function base64ToArray(base64) {
+				return new Uint8Array(
+					atob(base64)
+						.split('')
+						.map((c) => c.charCodeAt(0))
+				);
+			}
+
+			async function encryptFile(filename, content, fileKey) {
+				const filenameBytes = new TextEncoder().encode(filename);
+				const filenameLengthBytes = new Uint8Array(2);
+				new DataView(filenameLengthBytes.buffer).setUint16(0, filenameBytes.length);
+
+				const plaintext = new Uint8Array([...filenameLengthBytes, ...filenameBytes, ...new Uint8Array(content)]);
+
+				const nonce = crypto.getRandomValues(new Uint8Array(12));
+				const key = await crypto.subtle.importKey('raw', fileKey, { name: 'AES-GCM' }, false, ['encrypt']);
+				const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plaintext);
+
+				const magic = new TextEncoder().encode('SECF');
+				const version = new Uint8Array([0x01]);
+
+				return new Uint8Array([...magic, ...version, ...nonce, ...new Uint8Array(encrypted)]);
+			}
+
+			async function decryptFile(encryptedFile, fileKey) {
+				const magic = encryptedFile.slice(0, 4);
+				const expectedMagic = new TextEncoder().encode('SECF');
+				if (!arraysEqual(magic, expectedMagic)) {
+					throw new Error('Invalid file format');
+				}
+
+				const nonce = encryptedFile.slice(5, 17);
+				const ciphertext = encryptedFile.slice(17);
+
+				const key = await crypto.subtle.importKey('raw', fileKey, { name: 'AES-GCM' }, false, ['decrypt']);
+				const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, ciphertext);
+				const plaintextArray = new Uint8Array(plaintext);
+
+				const filenameLength = new DataView(plaintextArray.buffer).getUint16(0);
+				const filename = new TextDecoder().decode(plaintextArray.slice(2, 2 + filenameLength));
+				const content = plaintextArray.slice(2 + filenameLength);
+
+				return { filename, content };
+			}
+
+			function arraysEqual(a, b) {
+				if (a.length !== b.length) return false;
+				for (let i = 0; i < a.length; i++) {
+					if (a[i] !== b[i]) return false;
+				}
+				return true;
+			}
+
+			async function encryptKeychain(keychain, keychainKey) {
+				const json = JSON.stringify(keychain);
+				const fakeFilename = 'keychain.json';
+				return await encryptFile(fakeFilename, new TextEncoder().encode(json), keychainKey);
+			}
+
+			async function decryptKeychain(encryptedData, keychainKey) {
+				const { content } = await decryptFile(encryptedData, keychainKey);
+				const json = new TextDecoder().decode(content);
+				return JSON.parse(json);
+			}
+
+			// ===== API Functions =====
+
+			async function apiCall(endpoint, options = {}) {
+				const url = `${API_BASE}${endpoint}`;
+				const headers = { ...options.headers };
+
+				if (session.token) {
+					headers['Authorization'] = `Bearer ${session.token}`;
+				}
+
+				const response = await fetch(url, { ...options, headers });
+
+				if (!response.ok && response.headers.get('content-type')?.includes('application/json')) {
+					const error = await response.json();
+					throw new Error(error.error || `HTTP ${response.status}`);
+				}
+
+				return response;
+			}
+
+			// ===== Authentication =====
+
+			async function handleRegister(event) {
+				event.preventDefault();
+				const btn = document.getElementById('registerBtn');
+				btn.disabled = true;
+				btn.textContent = 'Creating...';
+
+				try {
+					const username = document.getElementById('regUsername').value;
+					const passphrase = document.getElementById('regPassphrase').value;
+
+					// Derive keys
+					const keys = await deriveKeys(passphrase, username);
+
+					// Register user
+					const response = await apiCall('/user', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							public_key: arrayToBase64(keys.publicKey),
+							keychain_id: keys.keychainId,
+						}),
+					});
+
+					const data = await response.json();
+
+					// Store session
+					session.userId = data.user_id;
+					session.keychainId = keys.keychainId; // Use derived keychain_id
+					session.privateKey = keys.privateKey;
+					session.publicKey = keys.publicKey;
+					session.keychainKey = keys.keychainKey;
+
+					// Initialize empty keychain
+					session.keychain = { version: 1, files: {} };
+
+					// Auto-login first to get token
+					await performLogin(username, passphrase);
+
+					// Now upload keychain with the token
+					const encryptedKeychain = await encryptKeychain(session.keychain, session.keychainKey);
+					await apiCall(`/file/${session.keychainId}`, {
+						method: 'PUT',
+						body: encryptedKeychain,
+					});
+
+					// Save session to localStorage
+					saveSession();
+				} catch (error) {
+					showError('registerError', error.message);
+					btn.disabled = false;
+					btn.textContent = 'Create Account';
+				}
+			}
+
+			async function handleLogin(event) {
+				event.preventDefault();
+				const username = document.getElementById('loginUsername').value;
+				const passphrase = document.getElementById('loginPassphrase').value;
+				await performLogin(username, passphrase);
+			}
+
+			async function performLogin(username, passphrase) {
+				const btn = document.getElementById('loginBtn');
+				if (btn) {
+					btn.disabled = true;
+					btn.textContent = 'Logging in...';
+				}
+
+				try {
+					// Derive keys
+					const keys = await deriveKeys(passphrase, username);
+					session.privateKey = keys.privateKey;
+					session.publicKey = keys.publicKey;
+					session.keychainKey = keys.keychainKey;
+					session.keychainId = keys.keychainId; // Derive keychain_id
+
+					// Get challenge using public key
+					const challengeResp = await apiCall('/auth/token', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							public_key: arrayToBase64(keys.publicKey), // Use public key to look up user
+							challenge: null,
+							signature: null,
+						}),
+					});
+
+					const { challenge, user_id } = await challengeResp.json();
+
+					// Sign challenge
+					const signature = await nobleEd25519.signAsync(new TextEncoder().encode(challenge), keys.privateKey);
+
+					// Exchange for token using the actual user_id returned
+					const tokenResp = await apiCall('/auth/token', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							public_key: arrayToBase64(keys.publicKey),
+							challenge,
+							signature: arrayToBase64(signature),
+						}),
+					});
+
+					const { token } = await tokenResp.json();
+					session.token = token;
+					session.userId = user_id; // Use the actual user_id from server
+
+					// Load keychain to get keychain_id
+					await loadFiles();
+
+					// Save session to localStorage
+					saveSession();
+
+					showSection('filesPage');
+				} catch (error) {
+					showError('loginError', error.message);
+					if (btn) {
+						btn.disabled = false;
+						btn.textContent = 'Login';
+					}
+				}
+			}
+
+			function logout() {
+				session = {
+					userId: null,
+					keychainId: null,
+					token: null,
+					keychainKey: null,
+					privateKey: null,
+					publicKey: null,
+					keychain: null,
+				};
+				localStorage.removeItem('cryptdrive_session');
+				showLanding();
+			}
+
+			// ===== File Management =====
+
+			async function loadFiles() {
+				document.getElementById('filesLoading').classList.remove('hidden');
+				document.getElementById('filesList').innerHTML = '';
+
+				try {
+					// Get file list
+					const response = await apiCall('/files');
+					const data = await response.json();
+
+					// Find keychain file (it's one of the files)
+					let keychainFile = null;
+					for (const file of data.files) {
+						// Try to decrypt as keychain
+						try {
+							const fileResp = await apiCall(`/file/${file.file_id}`);
+							const fileData = new Uint8Array(await fileResp.arrayBuffer());
+							const keychain = await decryptKeychain(fileData, session.keychainKey);
+
+							if (keychain.version === 1 && keychain.files) {
+								session.keychain = keychain;
+								session.keychainId = file.file_id;
+								keychainFile = file;
+								break;
+							}
+						} catch (e) {
+							// Not the keychain, continue
+						}
+					}
+
+					// Initialize keychain if not found (e.g., during fresh registration)
+					if (!session.keychain) {
+						session.keychain = { version: 1, files: {} };
+					}
+
+					if (!session.keychainId && data.files.length > 0) {
+						console.warn('Keychain file not found but files exist!');
+					}
+
+					// Display files
+					const filesList = document.getElementById('filesList');
+					const files = data.files.filter((f) => f.file_id !== session.keychainId);
+
+					if (files.length === 0) {
+						filesList.innerHTML = '<p>No files yet. Upload your first file!</p>';
+					} else {
+						files.forEach((file) => {
+							const fileInfo = session.keychain.files[file.file_id] || {};
+							const filename = fileInfo.filename || file.file_id;
+
+							const fileItem = document.createElement('div');
+							fileItem.className = 'file-item';
+							fileItem.innerHTML = `
+                            <div>
+                                <strong>${filename}</strong>
+                                <small> (${formatBytes(file.size)})</small>
+                            </div>
+                            <div>
+                                <button onclick="generateShareLink('${file.file_id}')">Share</button>
+                                <button onclick="downloadFile('${file.file_id}')">Download</button>
+                            </div>
+                        `;
+							filesList.appendChild(fileItem);
+						});
+					}
+				} catch (error) {
+					showError('filesError', error.message);
+				} finally {
+					document.getElementById('filesLoading').classList.add('hidden');
+				}
+			}
+
+			async function handleUpload(event) {
+				event.preventDefault();
+				const btn = document.getElementById('uploadBtn');
+				btn.disabled = true;
+				btn.textContent = 'Uploading...';
+
+				try {
+					const fileInput = document.getElementById('fileInput');
+					const file = fileInput.files[0];
+
+					// Generate file key
+					const fileKey = crypto.getRandomValues(new Uint8Array(32));
+
+					// Read and encrypt file
+					const arrayBuffer = await file.arrayBuffer();
+					const encryptedFile = await encryptFile(file.name, arrayBuffer, fileKey);
+
+					// Upload file
+					const uploadResp = await apiCall('/file', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/octet-stream' },
+						body: encryptedFile,
+					});
+
+					const { file_id } = await uploadResp.json();
+
+					// Update keychain
+					session.keychain.files[file_id] = {
+						key: Array.from(fileKey)
+							.map((b) => b.toString(16).padStart(2, '0'))
+							.join(''),
+						filename: file.name,
+						created: new Date().toISOString(),
+						size: encryptedFile.length,
+					};
+
+					// Upload updated keychain
+					const encryptedKeychain = await encryptKeychain(session.keychain, session.keychainKey);
+					await apiCall(`/file/${session.keychainId}`, {
+						method: 'PUT',
+						body: encryptedKeychain,
+					});
+
+					showSuccess('filesSuccess', `File "${file.name}" uploaded successfully!`);
+					fileInput.value = '';
+					await loadFiles();
+				} catch (error) {
+					showError('filesError', error.message);
+				} finally {
+					btn.disabled = false;
+					btn.textContent = 'Upload';
+				}
+			}
+
+			async function downloadFile(fileId, fileKeyBase64 = null) {
+				try {
+					let fileKey;
+
+					// Check if file key provided (from shared link)
+					if (fileKeyBase64) {
+						fileKey = base64ToArray(fileKeyBase64);
+					} else if (session.keychain && session.keychain.files[fileId]) {
+						// Get file key from keychain (for logged-in owner)
+						const fileInfo = session.keychain.files[fileId];
+						fileKey = new Uint8Array(fileInfo.key.match(/.{2}/g).map((byte) => parseInt(byte, 16)));
+					} else {
+						throw new Error('File not found in keychain. You may need a share link to access this file.');
+					}
+
+					// Download file (works with or without authentication)
+					const url = `${API_BASE}/file/${fileId}`;
+					const headers = {};
+					// Only add auth token if logged in (allows unauthenticated shared access)
+					if (session.token) {
+						headers['Authorization'] = `Bearer ${session.token}`;
+					}
+
+					const response = await fetch(url, { headers });
+					if (!response.ok) {
+						throw new Error(`Failed to download file: ${response.status}`);
+					}
+
+					const encryptedData = new Uint8Array(await response.arrayBuffer());
+
+					// Decrypt file
+					const { filename, content } = await decryptFile(encryptedData, fileKey);
+
+					// Trigger download
+					const blob = new Blob([content]);
+					const blobUrl = URL.createObjectURL(blob);
+					const a = document.createElement('a');
+					a.href = blobUrl;
+					a.download = filename;
+					a.click();
+					URL.revokeObjectURL(blobUrl);
+
+					showSuccess('filesSuccess', `Downloaded "${filename}"`);
+				} catch (error) {
+					showError('filesError', error.message);
+				}
+			}
+
+			function formatBytes(bytes) {
+				if (bytes === 0) return '0 Bytes';
+				const k = 1024;
+				const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+				const i = Math.floor(Math.log(bytes) / Math.log(k));
+				return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+			}
+
+			function generateShareLink(fileId) {
+				try {
+					const fileInfo = session.keychain.files[fileId];
+					if (!fileInfo) {
+						throw new Error('File not found in keychain');
+					}
+
+					// Get file key as bytes
+					const fileKey = new Uint8Array(fileInfo.key.match(/.{2}/g).map((byte) => parseInt(byte, 16)));
+					const fileKeyBase64 = arrayToBase64(fileKey);
+
+					// Generate shareable URL with key in fragment
+					const shareUrl = `${window.location.origin}#${fileId}:${fileKeyBase64}`;
+
+					// Copy to clipboard
+					navigator.clipboard
+						.writeText(shareUrl)
+						.then(() => {
+							showSuccess('filesSuccess', `Share link copied! Anyone with this link can download "${fileInfo.filename}". Keep it secure!`);
+						})
+						.catch(() => {
+							// Fallback: show the URL
+							prompt('Share this link (Ctrl+C to copy):', shareUrl);
+						});
+				} catch (error) {
+					showError('filesError', error.message);
+				}
+			}
+
+			// Expose functions to window for inline onclick handlers
+			window.showLanding = showLanding;
+			window.showRegister = showRegister;
+			window.showLogin = showLogin;
+			window.handleRegister = handleRegister;
+			window.handleLogin = handleLogin;
+			window.logout = logout;
+			window.handleUpload = handleUpload;
+			window.downloadFile = downloadFile;
+			window.generateShareLink = generateShareLink;
+
+			// Check if user is already logged in on page load
+			(async function checkSession() {
+				// Check for shared file link in URL fragment
+				const hash = window.location.hash.substring(1); // Remove #
+				if (hash && hash.includes(':')) {
+					const [fileId, fileKeyBase64] = hash.split(':');
+					if (fileId && fileKeyBase64) {
+						// Clear the hash from URL for privacy (without reloading page)
+						history.replaceState(null, '', window.location.pathname + window.location.search);
+
+						// Show a message and download the shared file
+						showSection('landingPage');
+						showSuccess('landingPage', 'Downloading shared file...');
+						await downloadFile(fileId, fileKeyBase64);
+						return;
+					}
+				}
+
+				// Normal session check
+				if (session.token && session.keychainId) {
+					try {
+						// Verify token is still valid by trying to fetch files
+						await loadFiles();
+						showSection('filesPage');
+					} catch (error) {
+						// Token expired or invalid, clear session
+						console.log('Session expired, please login again');
+						localStorage.removeItem('cryptdrive_session');
+						showLanding();
+					}
+				}
+			})();
+		</script>
+	</body>
+</html>
