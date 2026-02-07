@@ -3,10 +3,8 @@
 - Redirect to R2 signed URLs for uploads and downloads instead of proxying through the worker
 - Show tier 0 (free) limitations in the UI - especially the retention period for 24h
 - Review the use of the public key vs user ID in the authentication and rate limiting logic to ensure consistency and security
-- On user creation, generate a salt on the server and return it to the client. Using the username as salt is not ideal as it can lead to collisions and does not provide sufficient randomness. A unique salt for each user will enhance security.
-- Reduce challenge timeout and/or track to prevent replay attacks
 - Only allow unauthenticated file download for files that have been shared to avoid listing attacks
 - Allow users to delete their account and all associated data
-- Don't use an empty salt for HKDF, use something like "cryptdrive-v1" to ensure derived keys are unique to this application
 - Don't use "CREATE TABLE IF NOT EXISTS" on every request, create the table during a setup phase or check for its existence in a more efficient way
 - User better rate limiting, probably involving CAPTCHAs for unauthenticated endpoints
+- Add tests for positive /auth/token and replay attacks

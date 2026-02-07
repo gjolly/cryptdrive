@@ -742,6 +742,23 @@ async function handleAuthToken(request, env, corsHeaders) {
 		return jsonResponse({ error: 'user_id does not match challenge' }, 400, corsHeaders);
 	}
 
+	// Verify this is not a replay
+	const replayRecord = await env.DB.prepare('SELECT * FROM auth_challenges WHERE nonce = ?').bind(challengePayload.nonce).first();
+	if (replayRecord) {
+		// Record failed attempt
+		await recordFailedAuth(env, user.user_id);
+		return jsonResponse({ error: 'Challenge has already been used' }, 400, corsHeaders);
+	}
+
+	// Store nonce to prevent replay
+	await env.DB.prepare('INSERT INTO auth_challenges (nonce) VALUES (?)').bind(challengePayload.nonce).run();
+
+	// At this point, we know
+	//  * the signagure is valid for the challenge
+	//  * the challenge has not expired
+	//  * the challenge has not been replayed
+	// Now we can verify if the user is who they claim to be by checking the signature against their public key
+
 	// Verify signature with user's public key
 	const signatureValid = await verifyEd25519Signature(user.public_key, challenge, signature);
 
@@ -1253,6 +1270,17 @@ async function initializeDatabase(db) {
 			downloads INTEGER DEFAULT 0,
 			captcha_required INTEGER DEFAULT 0,
 			window_start TEXT NOT NULL
+		)
+	`
+		)
+		.run();
+
+	// Create auth_challenges table
+	await db
+		.prepare(
+			`
+		CREATE TABLE IF NOT EXISTS auth_challenges (
+			nonce TEXT PRIMARY KEY
 		)
 	`
 		)

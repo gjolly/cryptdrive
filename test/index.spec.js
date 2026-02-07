@@ -675,7 +675,12 @@ describe('CryptDrive Worker', () => {
 			const createOtherUserRequest = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: otherPublicKey, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					username: 'otheruser',
+					salt: 'othersalt',
+					public_key: otherPublicKey,
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
 			let ctx = createExecutionContext();
