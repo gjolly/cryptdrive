@@ -251,7 +251,7 @@ describe('CryptDrive Worker', () => {
 			await waitOnExecutionContext(ctx);
 
 			expect(response.status).toBe(200);
-			expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+			expect(response.headers.get('Access-Control-Allow-Origin')).not.toBe('*');
 			expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST');
 		});
 	});

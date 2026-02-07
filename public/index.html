@@ -559,16 +559,29 @@
 
 							const fileItem = document.createElement('div');
 							fileItem.className = 'file-item';
-							fileItem.innerHTML = `
-                            <div>
-                                <strong>${filename}</strong>
-                                <small> (${formatBytes(file.size)})</small>
-                            </div>
-                            <div>
-                                <button onclick="generateShareLink('${file.file_id}')">Share</button>
-                                <button onclick="downloadFile('${file.file_id}')">Download</button>
-                            </div>
-                        `;
+
+							// Create info div with filename and size (using textContent to prevent XSS)
+							const infoDiv = document.createElement('div');
+							const nameStrong = document.createElement('strong');
+							nameStrong.textContent = filename;
+							const sizeSmall = document.createElement('small');
+							sizeSmall.textContent = ` (${formatBytes(file.size)})`;
+							infoDiv.appendChild(nameStrong);
+							infoDiv.appendChild(sizeSmall);
+
+							// Create actions div with buttons
+							const actionsDiv = document.createElement('div');
+							const shareBtn = document.createElement('button');
+							shareBtn.textContent = 'Share';
+							shareBtn.onclick = () => generateShareLink(file.file_id);
+							const downloadBtn = document.createElement('button');
+							downloadBtn.textContent = 'Download';
+							downloadBtn.onclick = () => downloadFile(file.file_id);
+							actionsDiv.appendChild(shareBtn);
+							actionsDiv.appendChild(downloadBtn);
+
+							fileItem.appendChild(infoDiv);
+							fileItem.appendChild(actionsDiv);
 							filesList.appendChild(fileItem);
 						});
 					}

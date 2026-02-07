@@ -26,6 +26,9 @@
 	"triggers": {
 		"crons": ["0 3 * * *"],
 	},
+	"vars": {
+		"CORS_ORIGIN": "https://cryptdrive.gauthier.workers.dev",
+	},
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
