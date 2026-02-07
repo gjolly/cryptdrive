@@ -237,7 +237,7 @@ async function handleCreateUser(request, env, corsHeaders) {
  */
 async function computeOwnerHash(user_id, env) {
 	// Get server pepper from environment or use a default for development
-	const pepper = env.SERVER_PEPPER || 'default-pepper-change-in-production';
+	const pepper = env.SERVER_PEPPER;
 
 	// Use HMAC-SHA256 as specified in design document
 	const encoder = new TextEncoder();
@@ -693,7 +693,7 @@ async function handleAuthToken(request, env, corsHeaders) {
 	}
 
 	// Get JWT secret from environment
-	const jwtSecret = env.JWT_SECRET || 'default-jwt-secret-change-in-production';
+	const jwtSecret = env.JWT_SECRET;
 
 	// First request: generate challenge
 	if (!challenge && !signature) {
@@ -778,7 +778,7 @@ async function authenticateRequest(request, env) {
 	}
 
 	const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-	const jwtSecret = env.JWT_SECRET || 'default-jwt-secret-change-in-production';
+	const jwtSecret = env.JWT_SECRET;
 
 	try {
 		const payload = await verifyJWT(token, jwtSecret);
