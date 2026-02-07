@@ -14,7 +14,7 @@ nobleEd25519.etc.sha512Async = async (...messages) => {
 };
 
 // Configuration
-const API_BASE = window.location.origin;
+const API_BASE = window.location.origin + '/api/v1';
 
 // Load session from sessionStorage if available
 function loadSession() {

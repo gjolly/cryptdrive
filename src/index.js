@@ -9,6 +9,8 @@ export default {
 		const path = url.pathname;
 		const method = request.method;
 
+		const apiBase = '/api/v1';
+
 		// Check if the secrets are set in environment variables
 		// and refuse to operate if they are missing to prevent security issues.
 		if (!env.SERVER_PEPPER || !env.JWT_SECRET) {
@@ -29,27 +31,27 @@ export default {
 
 		try {
 			// Route: POST /user - Create new user
-			if (path === '/user' && method === 'POST') {
+			if (path === apiBase + '/user' && method === 'POST') {
 				return await handleCreateUser(request, env, corsHeaders);
 			}
 
 			// Route: POST /auth/token - Authentication
-			if (path === '/auth/token' && method === 'POST') {
+			if (path === apiBase + '/auth/token' && method === 'POST') {
 				return await handleAuthToken(request, env, corsHeaders);
 			}
 
 			// Route: GET /files - List files owned by user
-			if (path === '/files' && method === 'GET') {
+			if (path === apiBase + '/files' && method === 'GET') {
 				return await handleListFiles(request, env, corsHeaders);
 			}
 
 			// Route: POST /file - Create new file
-			if (path === '/file' && method === 'POST') {
+			if (path === apiBase + '/file' && method === 'POST') {
 				return await handleCreateFile(request, env, corsHeaders);
 			}
 
 			// Route: PUT /file/:file_id - Update file
-			const fileMatch = path.match(/^\/file\/([a-f0-9-]+)$/);
+			const fileMatch = path.match(new RegExp(`^${apiBase}/file/([a-f0-9-]+)$`));
 			if (fileMatch && method === 'PUT') {
 				const fileId = fileMatch[1];
 				return await handleUpdateFile(request, env, corsHeaders, fileId);
@@ -61,9 +63,8 @@ export default {
 			}
 
 			// Route: GET /file/:file_id - Get file
-			const getMatch = path.match(/^\/file\/([a-f0-9-]+)$/);
-			if (getMatch && method === 'GET') {
-				const fileId = getMatch[1];
+			if (fileMatch && method === 'GET') {
+				const fileId = fileMatch[1];
 				return await handleGetFile(request, env, corsHeaders, fileId);
 			}
 
