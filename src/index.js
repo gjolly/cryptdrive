@@ -203,8 +203,6 @@ async function handleCreateUser(request, env, corsHeaders) {
 		return jsonResponse({ error: 'Public key already registered' }, 409, corsHeaders);
 	}
 
-	console.log(`Creating user ${user_id} with public key ${public_key}`);
-
 	// Create user in database
 	await env.DB.prepare('INSERT INTO users (user_id, public_key, created_at) VALUES (?, ?, ?)')
 		.bind(user_id, public_key, new Date().toISOString())
@@ -676,8 +674,6 @@ async function handleAuthToken(request, env, corsHeaders) {
 
 	// Initialize database
 	await initializeDatabase(env.DB);
-
-	console.log(`Auth request for public_key: ${public_key}`);
 
 	// Check if user exists
 	const user = await env.DB.prepare('SELECT * FROM users WHERE public_key = ?').bind(public_key).first();
