@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>CryptDrive - End-to-End Encrypted Storage</title>
+		<link rel="stylesheet" href="https://cdn.simplecss.org/simple.min.css" />
+		<style>
+			.hidden {
+				display: none;
+			}
+			.file-item {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				padding: 0.5rem;
+				border: 1px solid var(--border);
+				margin-bottom: 0.5rem;
+				border-radius: 4px;
+			}
+			.file-item:hover {
+				background-color: var(--accent-bg);
+			}
+			.error {
+				color: var(--red);
+				padding: 1rem;
+				border: 1px solid var(--red);
+				border-radius: 4px;
+				margin-bottom: 1rem;
+			}
+			.success {
+				color: var(--green);
+				padding: 1rem;
+				border: 1px solid var(--green);
+				border-radius: 4px;
+				margin-bottom: 1rem;
+			}
+			.loading {
+				text-align: center;
+				padding: 2rem;
+			}
+		</style>
+	</head>
+	<body>
+		<header>
+			<h1>🔒 CryptDrive</h1>
+			<p>End-to-End Encrypted Storage</p>
+		</header>
+
+		<main>
+			<!-- Landing Page -->
+			<section id="landingPage">
+				<h2>Welcome</h2>
+				<p>Your files, encrypted on your device. The server never sees your data.</p>
+				<button onclick="showRegister()">Create Account</button>
+				<button onclick="showLogin()">Login</button>
+			</section>
+
+			<!-- Register Page -->
+			<section id="registerPage" class="hidden">
+				<h2>Create Account</h2>
+				<div id="registerError" class="error hidden"></div>
+				<form onsubmit="handleRegister(event)">
+					<label for="regUsername">Username</label>
+					<input type="text" id="regUsername" required autocomplete="username" />
+
+					<label for="regPassphrase">Passphrase (min 12 characters)</label>
+					<input type="password" id="regPassphrase" required minlength="12" autocomplete="new-password" />
+
+					<button type="submit" id="registerBtn">Create Account</button>
+					<button type="button" onclick="showLanding()">Cancel</button>
+				</form>
+			</section>
+
+			<!-- Login Page -->
+			<section id="loginPage" class="hidden">
+				<h2>Login</h2>
+				<div id="loginError" class="error hidden"></div>
+				<form onsubmit="handleLogin(event)">
+					<label for="loginUsername">Username</label>
+					<input type="text" id="loginUsername" required autocomplete="username" />
+
+					<label for="loginPassphrase">Passphrase</label>
+					<input type="password" id="loginPassphrase" required autocomplete="current-password" />
+
+					<button type="submit" id="loginBtn">Login</button>
+					<button type="button" onclick="showLanding()">Cancel</button>
+				</form>
+			</section>
+
+			<!-- Files Page -->
+			<section id="filesPage" class="hidden">
+				<div style="display: flex; justify-content: space-between; align-items: center">
+					<h2>Your Files</h2>
+					<button onclick="logout()">Logout</button>
+				</div>
+
+				<div id="filesSuccess" class="success hidden"></div>
+				<div id="filesError" class="error hidden"></div>
+
+				<!-- Upload Form -->
+				<details>
+					<summary>Upload New File</summary>
+					<form onsubmit="handleUpload(event)">
+						<label for="fileInput">Choose File</label>
+						<input type="file" id="fileInput" required />
+						<button type="submit" id="uploadBtn">Upload</button>
+					</form>
+				</details>
+
+				<!-- Files List -->
+				<div id="filesLoading" class="loading hidden">Loading files...</div>
+				<div id="filesList"></div>
+			</section>
+		</main>
+
+		<footer>
+			<p>All encryption happens in your browser. Your data is never exposed to the server.</p>
+			<p>
+				© 2026 Gauthier Jolly -
+				<a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0 License</a>
+			</p>
+			<p>View on <a href="https://github.com/gjolly/cryptdrive" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+		</footer>
+
+		<!-- Crypto Libraries -->
+		<script src="argon2-bundled.min.js"></script>
+		<script type="module" src="client.js"></script>
+	</body>
+</html>

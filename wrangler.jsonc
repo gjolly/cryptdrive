@@ -29,6 +29,13 @@
 	"vars": {
 		"CORS_ORIGIN": "https://cryptdrive.gauthier.workers.dev",
 	},
+	"assets": {
+		"directory": "./dist/",
+	},
+	"build": {
+		"watch_dir": "./src",
+		"command": "npm run build",
+	},
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

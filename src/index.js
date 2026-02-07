@@ -28,11 +28,7 @@ export default {
 		}
 
 		try {
-			// Route: GET / - Serve UI
-			if (path === '/' && method === 'GET') {
-				return await handleServeUI(env);
-			}
-
+			// Route: POST /user - Create new user
 			if (path === '/user' && method === 'POST') {
 				return await handleCreateUser(request, env, corsHeaders);
 			}
@@ -147,33 +143,6 @@ function jsonResponse(data, status = 200, additionalHeaders = {}) {
  */
 function generateUUID() {
 	return crypto.randomUUID();
-}
-
-/**
- * Handle GET / - Serve UI
- */
-async function handleServeUI(env) {
-	try {
-		// Get HTML file from R2
-		const html = await env.BUCKET.get('index.html');
-
-		if (!html) {
-			// Fallback: return basic HTML if file not found
-			return new Response('<h1>CryptDrive</h1><p>UI file not found. Please upload public/index.html to R2.</p>', {
-				headers: { 'Content-Type': 'text/html' },
-			});
-		}
-
-		return new Response(html.body, {
-			headers: {
-				'Content-Type': 'text/html',
-				'Cache-Control': 'public, max-age=3600',
-			},
-		});
-	} catch (error) {
-		console.error('Error serving UI:', error);
-		return new Response('Error loading UI', { status: 500 });
-	}
 }
 
 /**

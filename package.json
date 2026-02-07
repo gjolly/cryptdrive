@@ -11,24 +11,30 @@
 		}
 	],
 	"scripts": {
-		"deploy": "wrangler deploy && wrangler r2 object put --remote cryptdrive/index.html --file=public/index.html",
-		"dev": "wrangler r2 object put cryptdrive-preview/index.html --file=public/index.html && wrangler dev",
-		"start": "wrangler dev",
-		"test": "vitest",
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"test": "mkdir -p dist && vitest",
 		"lint": "eslint --max-warnings 0 .",
 		"lint:fix": "eslint . --fix",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
-		"check": "npm run lint && npm run format:check && npm run test -- --run"
+		"check": "npm run lint && npm run format:check && npm run test -- --run",
+		"build": "mkdir -p dist && cp src/index.html dist/index.html && npm run build:client",
+		"build:client": "cp node_modules/argon2-browser/dist/argon2-bundled.min.js dist/ && esbuild src/client.js --bundle --outfile=dist/client.js --format=esm --minify --target=es2020"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
 		"@eslint/js": "^9.17.0",
+		"esbuild": "^0.27.3",
 		"eslint": "^9.17.0",
 		"eslint-config-prettier": "^9.1.0",
 		"globals": "^15.14.0",
 		"prettier": "^3.4.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.62.0"
+	},
+	"dependencies": {
+		"@noble/ed25519": "^2.0.0",
+		"argon2-browser": "^1.18.0"
 	}
 }
