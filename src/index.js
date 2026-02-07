@@ -159,11 +159,6 @@ async function handleCreateUser(request, env, corsHeaders) {
 		return jsonResponse({ error: rateLimitCheck.error }, rateLimitCheck.status, corsHeaders);
 	}
 
-	// Note: In production, you would check for CAPTCHA if captcha_required is true
-	// if (rateLimitCheck.captcha_required && !verifyCaptcha(request)) {
-	//     return jsonResponse({ error: 'CAPTCHA verification required' }, 403, corsHeaders);
-	// }
-
 	let body;
 	try {
 		body = await request.json();
@@ -171,7 +166,7 @@ async function handleCreateUser(request, env, corsHeaders) {
 		return jsonResponse({ error: 'Invalid JSON' }, 400, corsHeaders);
 	}
 
-	const { public_key, keychain_id } = body;
+	const { public_key, keychain_id, salt, username } = body;
 
 	// Validate input
 	if (!public_key || typeof public_key !== 'string') {
@@ -181,6 +176,16 @@ async function handleCreateUser(request, env, corsHeaders) {
 	// keychain_id should be a UUID string
 	if (!keychain_id || typeof keychain_id !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(keychain_id)) {
 		return jsonResponse({ error: 'keychain_id is required and must be a valid UUID string' }, 400, corsHeaders);
+	}
+
+	// Validate salt
+	if (!salt || typeof salt !== 'string') {
+		return jsonResponse({ error: 'salt is required and must be a string' }, 400, corsHeaders);
+	}
+
+	// Validate username
+	if (!username || typeof username !== 'string' || username.length < 3 || username.length > 30) {
+		return jsonResponse({ error: 'username is required and must be between 3 and 30 characters' }, 400, corsHeaders);
 	}
 
 	// Validate public key format (base64)
@@ -197,15 +202,15 @@ async function handleCreateUser(request, env, corsHeaders) {
 	const user_id = generateUUID();
 
 	// Check if public key already exists
-	const existing = await env.DB.prepare('SELECT user_id FROM users WHERE public_key = ?').bind(public_key).first();
+	const existing = await env.DB.prepare('SELECT user_id FROM users WHERE username = ?').bind(username).first();
 
 	if (existing) {
-		return jsonResponse({ error: 'Public key already registered' }, 409, corsHeaders);
+		return jsonResponse({ error: 'Username already registered' }, 409, corsHeaders);
 	}
 
 	// Create user in database
-	await env.DB.prepare('INSERT INTO users (user_id, public_key, created_at) VALUES (?, ?, ?)')
-		.bind(user_id, public_key, new Date().toISOString())
+	await env.DB.prepare('INSERT INTO users (user_id, username, salt, public_key, created_at) VALUES (?, ?, ?, ?, ?)')
+		.bind(user_id, username, salt, public_key, new Date().toISOString())
 		.run();
 
 	// create empty keychain file in R2
@@ -429,8 +434,14 @@ async function checkFileOperationRateLimit(user_id, env, isWrite = false) {
 	const now = Date.now();
 	const oneMinute = 60 * 1000;
 	const limit = isWrite ? 20 : 50;
+	let record = null;
 
-	const record = await env.DB.prepare('SELECT * FROM file_operation_limits WHERE user_id = ?').bind(user_id).first();
+	try {
+		record = await env.DB.prepare('SELECT * FROM file_operation_limits WHERE user_id = ?').bind(user_id).first();
+	} catch (e) {
+		console.error('Error checking file operation rate limit:', e);
+		return { allowed: false, error: 'Internal server error', status: 500 };
+	}
 
 	if (record) {
 		const windowAge = now - new Date(record.window_start).getTime();
@@ -665,18 +676,18 @@ async function handleAuthToken(request, env, corsHeaders) {
 		return jsonResponse({ error: 'Invalid JSON' }, 400, corsHeaders);
 	}
 
-	const { public_key, challenge, signature } = body;
+	const { username, challenge, signature } = body;
 
-	// Validate public_key
-	if (!public_key || typeof public_key !== 'string') {
-		return jsonResponse({ error: 'public_key is required and must be a string' }, 400, corsHeaders);
+	// Validate username
+	if (!username || typeof username !== 'string' || username.length < 3 || username.length > 30) {
+		return jsonResponse({ error: 'username is required and must be between 3 and 30 characters' }, 400, corsHeaders);
 	}
 
 	// Initialize database
 	await initializeDatabase(env.DB);
 
 	// Check if user exists
-	const user = await env.DB.prepare('SELECT * FROM users WHERE public_key = ?').bind(public_key).first();
+	const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(username).first();
 	if (!user) {
 		return jsonResponse({ error: 'User not found' }, 404, corsHeaders);
 	}
@@ -695,9 +706,9 @@ async function handleAuthToken(request, env, corsHeaders) {
 		const nonce = randomHex(32); // 64 character hex string
 
 		const challengeJWT = await createJWT(
-			{ nonce, user_id: user.user_id },
+			{ nonce, user_id: user.user_id, username: user.username, salt: user.salt },
 			jwtSecret,
-			300 // 5 minutes
+			30 // seconds
 		);
 
 		return jsonResponse({ challenge: challengeJWT }, 200, corsHeaders);
@@ -771,6 +782,12 @@ async function authenticateRequest(request, env) {
 
 	try {
 		const payload = await verifyJWT(token, jwtSecret);
+
+		// Verify that the payload contains a valid user_id
+		if (!payload.sub || typeof payload.sub !== 'string') {
+			return { error: 'Invalid token: missing or invalid user_id', status: 401 };
+		}
+
 		return { user_id: payload.sub };
 	} catch (e) {
 		return { error: `Invalid or expired token: ${e.message}`, status: 401 };
@@ -1130,8 +1147,10 @@ async function initializeDatabase(db) {
 			`
 		CREATE TABLE IF NOT EXISTS users (
 			user_id TEXT PRIMARY KEY,
-			public_key TEXT NOT NULL UNIQUE,
-			created_at TEXT NOT NULL
+			public_key TEXT NOT NULL,
+			username TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL,
+			salt TEXT NOT NULL
 		)
 	`
 		)

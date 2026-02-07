@@ -95,16 +95,14 @@ function showSuccess(elementId, message) {
 
 // ===== Cryptographic Functions =====
 
-async function deriveMasterKey(passphrase, username) {
+async function deriveMasterKey(passphrase, salt) {
 	// Convert username to Uint8Array and ensure it's at least 8 bytes (Argon2 requirement)
 	const encoder = new TextEncoder();
-	let saltBytes = encoder.encode(username);
+	const saltBytes = encoder.encode(salt);
 
 	// Pad to at least 8 bytes if needed
 	if (saltBytes.length < 8) {
-		const padded = new Uint8Array(8);
-		padded.set(saltBytes);
-		saltBytes = padded;
+		throw new Error('Salt must be at least 8 bytes long');
 	}
 
 	const result = await argon2.hash({
@@ -121,7 +119,7 @@ async function deriveMasterKey(passphrase, username) {
 
 async function hkdf(masterKey, info, length = 32) {
 	const ikm = masterKey;
-	const salt = new Uint8Array(0);
+	const salt = new TextEncoder().encode('cryptdrive-v1');
 	const infoBytes = new TextEncoder().encode(info);
 
 	const key = await crypto.subtle.importKey('raw', ikm, { name: 'HKDF' }, false, ['deriveBits']);
@@ -131,8 +129,8 @@ async function hkdf(masterKey, info, length = 32) {
 	return new Uint8Array(bits);
 }
 
-async function deriveKeys(passphrase, username) {
-	const masterKey = await deriveMasterKey(passphrase, username);
+async function deriveKeys(passphrase, salt) {
+	const masterKey = await deriveMasterKey(passphrase, salt);
 	const authSeed = await hkdf(masterKey, 'auth-v1');
 	const keychainKey = await hkdf(masterKey, 'keychain-v1');
 	const keychainIdSeed = await hkdf(masterKey, 'keychain-id-v1', 16);
@@ -251,16 +249,22 @@ async function handleRegister(event) {
 		const username = document.getElementById('regUsername').value;
 		const passphrase = document.getElementById('regPassphrase').value;
 
+		// generate a random salt for this user
+		const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+		const salt = arrayToBase64(saltBytes);
+
 		// Derive keys
-		const keys = await deriveKeys(passphrase, username);
+		const keys = await deriveKeys(passphrase, salt);
 
 		// Register user
 		const response = await apiCall('/user', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
+				username,
 				public_key: arrayToBase64(keys.publicKey),
 				keychain_id: keys.keychainId,
+				salt, // Send the salt to the server for storage
 			}),
 		});
 
@@ -310,25 +314,34 @@ async function performLogin(username, passphrase) {
 	}
 
 	try {
-		// Derive keys
-		const keys = await deriveKeys(passphrase, username);
-		session.privateKey = keys.privateKey;
-		session.publicKey = keys.publicKey;
-		session.keychainKey = keys.keychainKey;
-		session.keychainId = keys.keychainId; // Derive keychain_id
-
 		// Get challenge using public key
 		const challengeResp = await apiCall('/auth/token', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
-				public_key: arrayToBase64(keys.publicKey), // Use public key to look up user
+				username,
 				challenge: null,
 				signature: null,
 			}),
 		});
 
-		const { challenge, user_id } = await challengeResp.json();
+		const { challenge } = await challengeResp.json();
+
+		// decode the challenge JWT to extract the salt (and user_id for verification)
+		const decoded = JSON.parse(atob(challenge.split('.')[1]));
+		const salt = decoded.salt;
+		const user_id = decoded.user_id;
+
+		if (!salt || !user_id) {
+			throw new Error('Invalid challenge format: missing salt or user_id');
+		}
+
+		// Derive keys
+		const keys = await deriveKeys(passphrase, salt);
+		session.privateKey = keys.privateKey;
+		session.publicKey = keys.publicKey;
+		session.keychainKey = keys.keychainKey;
+		session.keychainId = keys.keychainId;
 
 		// Sign challenge
 		const signature = await nobleEd25519.signAsync(new TextEncoder().encode(challenge), keys.privateKey);
@@ -338,7 +351,7 @@ async function performLogin(username, passphrase) {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
-				public_key: arrayToBase64(keys.publicKey),
+				username,
 				challenge,
 				signature: arrayToBase64(signature),
 			}),
@@ -346,7 +359,6 @@ async function performLogin(username, passphrase) {
 
 		const { token } = await tokenResp.json();
 		session.token = token;
-		session.userId = user_id; // Use the actual user_id from server
 
 		// Load keychain to get keychain_id
 		await loadFiles();

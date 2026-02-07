@@ -26,7 +26,12 @@ describe('CryptDrive Worker', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: btoa('a'.repeat(32)), keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					username: 'testuser',
+					salt: 'testsalt',
+					public_key: btoa('a'.repeat(32)),
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
 			// Create a temporary env without SERVER_PEPPER
@@ -44,7 +49,12 @@ describe('CryptDrive Worker', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: btoa('a'.repeat(32)), keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					username: 'testuser',
+					salt: 'testsalt',
+					public_key: btoa('a'.repeat(32)),
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
 			// Create a temporary env without JWT_SECRET
@@ -62,14 +72,19 @@ describe('CryptDrive Worker', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: btoa('a'.repeat(32)), keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					username: 'testuser',
+					salt: 'testsalt',
+					public_key: btoa('a'.repeat(32)),
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
 			const ctx = createExecutionContext();
 			const response = await worker.fetch(request, env, ctx);
 			await waitOnExecutionContext(ctx);
 
-			expect(response.status).toBe(201);
+			expect(response.status, await response.text()).toBe(201);
 		});
 	});
 
@@ -80,7 +95,7 @@ describe('CryptDrive Worker', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: publicKey, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({ username: 'testuser', salt: 'testsalt', public_key: publicKey, keychain_id: crypto.randomUUID() }),
 			});
 
 			const ctx = createExecutionContext();
@@ -105,7 +120,7 @@ describe('CryptDrive Worker', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: publicKey, keychain_id: keychainId }),
+				body: JSON.stringify({ username: 'testuser', salt: 'testsalt', public_key: publicKey, keychain_id: keychainId }),
 			});
 
 			const ctx = createExecutionContext();
@@ -130,14 +145,19 @@ describe('CryptDrive Worker', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: publicKey, keychain_id: keychainId }),
+				body: JSON.stringify({
+					username: 'testuser',
+					salt: 'testsalt',
+					public_key: publicKey,
+					keychain_id: keychainId,
+				}),
 			});
 
 			const ctx = createExecutionContext();
 			const response = await worker.fetch(request, env, ctx);
 			await waitOnExecutionContext(ctx);
 
-			expect(response.status).toBe(201);
+			expect(response.status, await response.text()).toBe(201);
 
 			// Check R2 bucket
 			const keychainObject = await env.BUCKET.get(`${keychainId}`);
@@ -164,7 +184,12 @@ describe('CryptDrive Worker', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: 'not-valid-base64!!!', keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					username: 'testuser',
+					salt: 'testsalt',
+					public_key: 'not-valid-base64!!!',
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
 			const ctx = createExecutionContext();
@@ -182,7 +207,12 @@ describe('CryptDrive Worker', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: shortKey, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					username: 'testuser',
+					salt: 'testsalt',
+					public_key: shortKey,
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
 			const ctx = createExecutionContext();
@@ -194,14 +224,19 @@ describe('CryptDrive Worker', () => {
 			expect(data.error).toContain('32-byte');
 		});
 
-		it('rejects duplicate public key', async () => {
+		it('rejects duplicate username', async () => {
 			const publicKey = btoa('d'.repeat(32));
 
 			// First request - should succeed
 			const request1 = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: publicKey, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					username: 'testuser',
+					salt: 'testsalt',
+					public_key: publicKey,
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
 			const ctx1 = createExecutionContext();
@@ -209,11 +244,16 @@ describe('CryptDrive Worker', () => {
 			await waitOnExecutionContext(ctx1);
 			expect(response1.status).toBe(201);
 
-			// Second request with same public key - should fail
+			// Second request with same username - should fail
 			const request2 = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: publicKey, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					username: 'testuser',
+					salt: 'testsalt',
+					public_key: publicKey,
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
 			const ctx2 = createExecutionContext();
@@ -275,6 +315,8 @@ describe('CryptDrive Worker', () => {
 	describe('POST /auth/token', () => {
 		let testUserId;
 		let testPublicKey;
+		const testUserName = 'testuser';
+		const testSalt = 'testsalt';
 
 		beforeEach(async () => {
 			// Create a test user first
@@ -283,7 +325,12 @@ describe('CryptDrive Worker', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: testPublicKey, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					username: testUserName,
+					salt: testSalt,
+					public_key: testPublicKey,
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
 			const ctx = createExecutionContext();
@@ -299,7 +346,7 @@ describe('CryptDrive Worker', () => {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					public_key: testPublicKey,
+					username: testUserName,
 					challenge: null,
 					signature: null,
 				}),
@@ -324,7 +371,7 @@ describe('CryptDrive Worker', () => {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					public_key: testPublicKey,
+					username: testUserName,
 					challenge: null,
 					signature: null,
 				}),
@@ -346,7 +393,7 @@ describe('CryptDrive Worker', () => {
 			expect(payload.nonce.length).toBe(64); // 32 bytes as hex
 			expect(payload.iat).toBeTruthy();
 			expect(payload.exp).toBeTruthy();
-			expect(payload.exp - payload.iat).toBe(300); // 5 minutes
+			expect(payload.exp - payload.iat).toBe(30); // 30 seconds
 		});
 
 		it('rejects request without user_id', async () => {
@@ -362,7 +409,7 @@ describe('CryptDrive Worker', () => {
 
 			expect(response.status).toBe(400);
 			const data = await response.json();
-			expect(data.error).toContain('public_key');
+			expect(data.error).toContain('username');
 		});
 
 		it('rejects request for non-existent user', async () => {
@@ -370,7 +417,7 @@ describe('CryptDrive Worker', () => {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					public_key: 'nonexistentpublickey==',
+					username: 'nonexistentuser',
 					challenge: null,
 					signature: null,
 				}),
@@ -390,7 +437,7 @@ describe('CryptDrive Worker', () => {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					public_key: testPublicKey,
+					username: testUserName,
 					challenge: 'some.jwt.token',
 					signature: null,
 				}),
@@ -410,7 +457,7 @@ describe('CryptDrive Worker', () => {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					public_key: testPublicKey,
+					username: testUserName,
 					challenge: null,
 					signature: 'somesignature',
 				}),
@@ -430,7 +477,7 @@ describe('CryptDrive Worker', () => {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					public_key: testPublicKey,
+					username: testUserName,
 					challenge: 'invalid.jwt.token',
 					signature: btoa('f'.repeat(64)),
 				}),
@@ -445,48 +492,13 @@ describe('CryptDrive Worker', () => {
 			expect(data.error).toContain('Invalid challenge');
 		});
 
-		it('rejects when public_key does not match challenge', async () => {
-			// Get a challenge for one user
-			const request1 = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					public_key: testPublicKey,
-					challenge: null,
-					signature: null,
-				}),
-			});
-
-			const ctx1 = createExecutionContext();
-			const response1 = await worker.fetch(request1, env, ctx1);
-			await waitOnExecutionContext(ctx1);
-			const data1 = await response1.json();
-
-			// Try to use it with a different user_id
-			const request2 = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					public_key: 'nonexistentpublickey==',
-					challenge: data1.challenge,
-					signature: btoa('g'.repeat(64)),
-				}),
-			});
-
-			const ctx2 = createExecutionContext();
-			const response2 = await worker.fetch(request2, env, ctx2);
-			await waitOnExecutionContext(ctx2);
-
-			expect(response2.status).toBe(404); // User not found first
-		});
-
 		it('rejects invalid signature', async () => {
 			// Get a valid challenge
 			const request1 = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					public_key: testPublicKey,
+					username: testUserName,
 					challenge: null,
 					signature: null,
 				}),
@@ -502,7 +514,8 @@ describe('CryptDrive Worker', () => {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					public_key: testPublicKey,
+					username: testUserName,
+					salt: testSalt,
 					challenge: data1.challenge,
 					signature: btoa('h'.repeat(64)), // Invalid signature
 				}),
@@ -996,6 +1009,8 @@ describe('PUT /file/:file_id - Update file', () => {
 	let testPublicKey;
 	let testToken;
 	let testFileId;
+	const testUserName = 'updatefileuser';
+	const salt = 'updatesalt';
 
 	beforeEach(async () => {
 		// Clean up database before each test
@@ -1012,7 +1027,12 @@ describe('PUT /file/:file_id - Update file', () => {
 		const createUserRequest = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ public_key: testPublicKey, keychain_id: crypto.randomUUID() }),
+			body: JSON.stringify({
+				public_key: testPublicKey,
+				username: testUserName,
+				salt: salt,
+				keychain_id: crypto.randomUUID(),
+			}),
 		});
 
 		let ctx = createExecutionContext();
@@ -1161,7 +1181,12 @@ describe('PUT /file/:file_id - Update file', () => {
 		const createUserRequest = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ public_key: otherPublicKey, keychain_id: crypto.randomUUID() }),
+			body: JSON.stringify({
+				public_key: otherPublicKey,
+				keychain_id: crypto.randomUUID(),
+				username: 'otheruser',
+				salt: 'othersalt',
+			}),
 		});
 
 		let ctx = createExecutionContext();
@@ -1304,6 +1329,8 @@ describe('DELETE /file/:file_id - Delete file', () => {
 	let testPublicKey;
 	let testToken;
 	let testFileId;
+	const testUserName = 'deletefileuser';
+	const salt = 'deletesalt';
 
 	beforeEach(async () => {
 		// Clean up database before each test
@@ -1320,7 +1347,12 @@ describe('DELETE /file/:file_id - Delete file', () => {
 		const createUserRequest = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ public_key: testPublicKey, keychain_id: crypto.randomUUID() }),
+			body: JSON.stringify({
+				public_key: testPublicKey,
+				keychain_id: crypto.randomUUID(),
+				username: testUserName,
+				salt: salt,
+			}),
 		});
 
 		let ctx = createExecutionContext();
@@ -1439,7 +1471,12 @@ describe('DELETE /file/:file_id - Delete file', () => {
 		const createUserRequest = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ public_key: otherPublicKey, keychain_id: crypto.randomUUID() }),
+			body: JSON.stringify({
+				public_key: otherPublicKey,
+				keychain_id: crypto.randomUUID(),
+				username: 'otheruser',
+				salt: 'othersalt',
+			}),
 		});
 
 		let ctx = createExecutionContext();
@@ -1534,28 +1571,8 @@ async function computeOwnerHashForTest(user_id, env) {
 // Helper function to create and authenticate a test user
 async function createAndAuthenticateTestUser() {
 	// Create user
-	const publicKey = btoa('test-user-key'.padEnd(32, '0'));
-	let request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ public_key: publicKey, keychain_id: crypto.randomUUID() }),
-	});
-	let response = await worker.fetch(request, env, createExecutionContext());
-
-	// Get challenge
-	request = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ public_key: publicKey }),
-	});
-	response = await worker.fetch(request, env, createExecutionContext());
-	const challengeData = await response.json();
-
-	// For testing, we'll create a valid signature using Ed25519
-	// In a real test, you'd use a proper Ed25519 signing function
-	// For now, we'll use a mock approach
-	const encoder = new TextEncoder();
-	encoder.encode(challengeData.challenge);
+	const username = `testuser_${crypto.randomUUID().slice(0, 8)}`;
+	const salt = 'testsalt';
 
 	// Generate Ed25519 key pair for testing
 	const keyPair = await crypto.subtle.generateKey({ name: 'Ed25519', namedCurve: 'Ed25519' }, true, ['sign', 'verify']);
@@ -1565,25 +1582,32 @@ async function createAndAuthenticateTestUser() {
 	const realPublicKey = btoa(String.fromCharCode(...new Uint8Array(exportedPublicKey)));
 
 	// Create user again with real key
-	request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
+	let request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ public_key: realPublicKey, keychain_id: crypto.randomUUID() }),
+		body: JSON.stringify({
+			public_key: realPublicKey,
+			keychain_id: crypto.randomUUID(),
+			username: username,
+			salt: salt,
+		}),
 	});
-	response = await worker.fetch(request, env, createExecutionContext());
+	let response = await worker.fetch(request, env, createExecutionContext());
 	const realUserData = await response.json();
+
+	expect(response.status, JSON.stringify(realUserData)).toBe(201);
 
 	// Get new challenge
 	request = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ public_key: realPublicKey }),
+		body: JSON.stringify({ username: username }),
 	});
 	response = await worker.fetch(request, env, createExecutionContext());
 	const realChallengeData = await response.json();
 
 	// Sign with private key
-	const signatureBytes = await crypto.subtle.sign('Ed25519', keyPair.privateKey, encoder.encode(realChallengeData.challenge));
+	const signatureBytes = await crypto.subtle.sign('Ed25519', keyPair.privateKey, new TextEncoder().encode(realChallengeData.challenge));
 	const signature = btoa(String.fromCharCode(...new Uint8Array(signatureBytes)));
 
 	// Exchange signature for token
@@ -1591,7 +1615,7 @@ async function createAndAuthenticateTestUser() {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
-			public_key: realPublicKey,
+			username: username,
 			challenge: realChallengeData.challenge,
 			signature: signature,
 		}),
@@ -1601,6 +1625,8 @@ async function createAndAuthenticateTestUser() {
 
 	return {
 		user_id: realUserData.user_id,
+		username: username,
+		salt: salt,
 		keychain_id: realUserData.keychain_id,
 		token: tokenData.token,
 		public_key: realPublicKey,
@@ -1666,7 +1692,12 @@ describe('Rate Limiting', () => {
 			let request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers,
-				body: JSON.stringify({ public_key: publicKey1, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					public_key: publicKey1,
+					keychain_id: crypto.randomUUID(),
+					username: 'user1',
+					salt: 'salt1',
+				}),
 			});
 			let response = await worker.fetch(request, env, createExecutionContext());
 			expect(response.status).toBe(201);
@@ -1675,7 +1706,12 @@ describe('Rate Limiting', () => {
 			request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers,
-				body: JSON.stringify({ public_key: publicKey2, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					public_key: publicKey2,
+					keychain_id: crypto.randomUUID(),
+					username: 'user2',
+					salt: 'salt2',
+				}),
 			});
 			response = await worker.fetch(request, env, createExecutionContext());
 			expect(response.status).toBe(201);
@@ -1684,7 +1720,12 @@ describe('Rate Limiting', () => {
 			request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers,
-				body: JSON.stringify({ public_key: publicKey3, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					public_key: publicKey3,
+					keychain_id: crypto.randomUUID(),
+					username: 'user3',
+					salt: 'salt3',
+				}),
 			});
 			response = await worker.fetch(request, env, createExecutionContext());
 			expect(response.status).toBe(201);
@@ -1704,7 +1745,12 @@ describe('Rate Limiting', () => {
 				const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 					method: 'POST',
 					headers,
-					body: JSON.stringify({ public_key: publicKey, keychain_id: crypto.randomUUID() }),
+					body: JSON.stringify({
+						public_key: publicKey,
+						keychain_id: crypto.randomUUID(),
+						username: `user${i + 1}`,
+						salt: `salt${i + 1}`,
+					}),
 				});
 				await worker.fetch(request, env, createExecutionContext());
 			}
@@ -1736,7 +1782,12 @@ describe('Rate Limiting', () => {
 					'User-Agent': 'TestAgent1',
 					'Accept-Language': 'en-US',
 				},
-				body: JSON.stringify({ public_key: publicKey1, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					public_key: publicKey1,
+					keychain_id: crypto.randomUUID(),
+					username: 'user1',
+					salt: 'salt1',
+				}),
 			});
 			let response = await worker.fetch(request, env, createExecutionContext());
 			expect(response.status).toBe(201);
@@ -1750,7 +1801,12 @@ describe('Rate Limiting', () => {
 					'User-Agent': 'TestAgent2',
 					'Accept-Language': 'en-US',
 				},
-				body: JSON.stringify({ public_key: publicKey2, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					public_key: publicKey2,
+					keychain_id: crypto.randomUUID(),
+					username: 'user2',
+					salt: 'salt2',
+				}),
 			});
 			response = await worker.fetch(request, env, createExecutionContext());
 			expect(response.status).toBe(201);
@@ -1766,7 +1822,12 @@ describe('Rate Limiting', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: testPublicKey, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					public_key: testPublicKey,
+					keychain_id: crypto.randomUUID(),
+					username: 'testuser',
+					salt: 'testsalt',
+				}),
 			});
 			const response = await worker.fetch(request, env, createExecutionContext());
 			const data = await response.json();
@@ -1784,7 +1845,7 @@ describe('Rate Limiting', () => {
 				const request = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
 					method: 'POST',
 					headers,
-					body: JSON.stringify({ public_key: testPublicKey }),
+					body: JSON.stringify({ username: 'testuser' }),
 				});
 				const response = await worker.fetch(request, env, createExecutionContext());
 				expect(response.status).toBe(200);
@@ -1802,7 +1863,7 @@ describe('Rate Limiting', () => {
 				const request = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
 					method: 'POST',
 					headers,
-					body: JSON.stringify({ public_key: testPublicKey }),
+					body: JSON.stringify({ username: 'testuser' }),
 				});
 				await worker.fetch(request, env, createExecutionContext());
 			}
@@ -1811,7 +1872,7 @@ describe('Rate Limiting', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
 				method: 'POST',
 				headers,
-				body: JSON.stringify({ public_key: testPublicKey }),
+				body: JSON.stringify({ username: 'testuser' }),
 			});
 			const response = await worker.fetch(request, env, createExecutionContext());
 			expect(response.status).toBe(429);
@@ -1825,7 +1886,7 @@ describe('Rate Limiting', () => {
 			let request = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: testPublicKey }),
+				body: JSON.stringify({ username: 'testuser' }),
 			});
 			let response = await worker.fetch(request, env, createExecutionContext());
 			const challengeData = await response.json();
@@ -1835,7 +1896,7 @@ describe('Rate Limiting', () => {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					public_key: testPublicKey,
+					username: 'testuser',
 					challenge: challengeData.challenge,
 					signature: btoa('invalid-signature'.padEnd(64, '0')),
 				}),
