@@ -144,9 +144,9 @@
 			// Configuration
 			const API_BASE = window.location.origin;
 
-			// Load session from localStorage if available
+			// Load session from sessionStorage if available
 			function loadSession() {
-				const stored = localStorage.getItem('cryptdrive_session');
+				const stored = sessionStorage.getItem('cryptdrive_session');
 				if (stored) {
 					try {
 						const parsed = JSON.parse(stored);
@@ -157,7 +157,7 @@
 						return parsed;
 					} catch (e) {
 						console.error('Failed to load session:', e);
-						localStorage.removeItem('cryptdrive_session');
+						sessionStorage.removeItem('cryptdrive_session');
 					}
 				}
 				return {
@@ -171,7 +171,7 @@
 				};
 			}
 
-			// Save session to localStorage
+			// Save session to sessionStorage
 			function saveSession() {
 				try {
 					const toStore = { ...session };
@@ -179,7 +179,7 @@
 					if (toStore.keychainKey) toStore.keychainKey = arrayToBase64(toStore.keychainKey);
 					if (toStore.privateKey) toStore.privateKey = arrayToBase64(toStore.privateKey);
 					if (toStore.publicKey) toStore.publicKey = arrayToBase64(toStore.publicKey);
-					localStorage.setItem('cryptdrive_session', JSON.stringify(toStore));
+					sessionStorage.setItem('cryptdrive_session', JSON.stringify(toStore));
 				} catch (e) {
 					console.error('Failed to save session:', e);
 				}
@@ -414,7 +414,7 @@
 						body: encryptedKeychain,
 					});
 
-					// Save session to localStorage
+					// Save session to sessionStorage
 					saveSession();
 				} catch (error) {
 					showError('registerError', error.message);
@@ -479,7 +479,7 @@
 					// Load keychain to get keychain_id
 					await loadFiles();
 
-					// Save session to localStorage
+					// Save session to sessionStorage
 					saveSession();
 
 					showSection('filesPage');
@@ -502,7 +502,7 @@
 					publicKey: null,
 					keychain: null,
 				};
-				localStorage.removeItem('cryptdrive_session');
+				sessionStorage.removeItem('cryptdrive_session');
 				showLanding();
 			}
 
@@ -756,7 +756,7 @@
 					} catch (error) {
 						// Token expired or invalid, clear session
 						console.log('Session expired, please login again');
-						localStorage.removeItem('cryptdrive_session');
+						sessionStorage.removeItem('cryptdrive_session');
 						showLanding();
 					}
 				}
