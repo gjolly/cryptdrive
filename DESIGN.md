@@ -1,7 +1,7 @@
 # End-to-End Encrypted Storage System - Design Document
 
-**Version:** 1.0  
-**Date:** February 3, 2026  
+**Version:** 2.0
+**Date:** February 8, 2026
 **Status:** Draft
 
 ---
@@ -15,7 +15,6 @@
 5. [Data Formats](#data-formats)
 6. [Workflows](#workflows)
 7. [Security Considerations](#security-considerations)
-8. [Implementation Notes](#implementation-notes)
 
 ---
 
@@ -82,7 +81,7 @@ This document describes an end-to-end encrypted (E2EE) storage system where:
 
 - Argon2 for key derivation
 - Ed25519 for authentication signatures
-- AES-256-GCM or ChaCha20-Poly1305 for file encryption
+- AES-256-GCM for file encryption
 - HMAC-SHA256 for capability proofs
 
 **Server-Side:**
@@ -134,7 +133,7 @@ Ed25519 Key Pair
 - **Key Derivation**: Argon2id (time=3, memory=65536, parallelism=4)
 - **HKDF**: HMAC-SHA256
 - **Asymmetric Auth**: Ed25519
-- **File Encryption**: AES-256-GCM (or ChaCha20-Poly1305)
+- **File Encryption**: AES-256-GCM
 - **Keychain Encryption**: AES-256-GCM
 - **Blind Index**: HMAC-SHA256(UID, server_pepper)
 
@@ -169,7 +168,10 @@ POST /user
 Content-Type: application/json
 
 {
-    "public_key": "base64_encoded_public_key"
+    "username": "username",
+    "salt": "random_salt",
+    "public_key": "base64_ed25519_public_key_derived_from_passphrase",
+    "keychain_id": "uuid_dervied_from_passphrase"
 }
 ```
 
@@ -185,10 +187,13 @@ Content-Type: application/json
 
 - Creates a new user account
 - Associates public key with client ID
+- Store salt for key derivation on login
+
   **Server Actions:**
 
 1. Generate unique `user_id` (UUID)
 2. Store `user_id` → `public_key` mapping
+3. Store `user_id` → `keychain_id` mapping
 
 ---
 
@@ -201,7 +206,7 @@ POST /auth/token
 Content-Type: application/json
 
 {
-    "user_id": "uuid",
+    "username": "username",
     "challenge": null,
     "signature": null
 }
@@ -219,8 +224,10 @@ Content-Type: application/json
 
 ```json
 {
-	"nonce": "64_char_hex_string",
+	"nonce": "32_char_hex_string",
 	"user_id": "uuid",
+	"username": "username",
+	"salt": "user_salt_for_key_derivation",
 	"iat": 1234567890,
 	"exp": 1234568190
 }
@@ -229,8 +236,8 @@ Content-Type: application/json
 **Description:**
 
 - Server generates a signed JWT challenge
-- Challenge expires in 5 minutes
-- Completely stateless (no server-side nonce storage)
+- Challenge expires in 30 seconds
+- Nonce is random 32-character hex string
 
 ---
 
@@ -276,6 +283,7 @@ Content-Type: application/json
   2. `user_id` matches challenge payload
   3. Signature is valid for the user's public key
 - Returns access token (1 hour expiry)
+- Stores nonce as used to prevent replay attacks
 
 ---
 
@@ -312,16 +320,9 @@ Authorization: Bearer <JWT>
 **Description:**
 
 - Returns list of files owned by authenticated user
-- Uses blind index to find files: `HMAC(client_id, server_pepper)`
+- Uses blind index to find files: `HMAC(user_id, server_pepper)`
 - Does not include filenames (they're encrypted in the files)
 - Client must cross-reference with keychain to get filenames
-
-**Server Logic:**
-
-```python
-owner_hash = HMAC(jwt.sub, server_pepper)
-files = db.query("SELECT * FROM files WHERE owner_hash = ?", owner_hash)
-```
 
 ---
 
@@ -1310,484 +1311,3 @@ But NOT against:
 - Enforce HTTPS/TLS
 - Certificate pinning
 - Check for certificate transparency
-
----
-
-## Implementation Notes
-
-### Client Implementation (JavaScript)
-
-**Key Libraries:**
-
-```javascript
-// Key derivation
-import argon2 from 'argon2-browser';
-
-// Asymmetric crypto
-import * as ed25519 from '@noble/ed25519';
-
-// Symmetric crypto
-import { webcrypto } from 'crypto'; // Node.js
-// or use window.crypto in browser
-
-// HKDF
-import hkdf from 'futoin-hkdf';
-```
-
-**Key Derivation Example:**
-
-```javascript
-async function deriveMasterKey(passphrase, username) {
-	const result = await argon2.hash({
-		pass: passphrase,
-		salt: username,
-		time: 3,
-		mem: 65536,
-		hashLen: 32,
-		parallelism: 4,
-		type: argon2.ArgonType.Argon2id,
-	});
-	return result.hash; // 32 bytes
-}
-
-async function deriveAuthKey(masterKey) {
-	return hkdf(masterKey, 32, { salt: '', info: 'auth-v1', hash: 'SHA-256' });
-}
-
-async function deriveKeychainKey(masterKey) {
-	return hkdf(masterKey, 32, { salt: '', info: 'keychain-v1', hash: 'SHA-256' });
-}
-```
-
-**Ed25519 Key Generation:**
-
-```javascript
-async function generateAuthKeyPair(authSeed) {
-	const privateKey = authSeed; // 32 bytes
-	const publicKey = await ed25519.getPublicKey(privateKey);
-	return { privateKey, publicKey };
-}
-
-async function signChallenge(privateKey, challenge) {
-	const message = new TextEncoder().encode(challenge);
-	const signature = await ed25519.sign(message, privateKey);
-	return signature; // 64 bytes
-}
-```
-
-**File Encryption:**
-
-```javascript
-async function encryptFile(filename, content, fileKey) {
-	// Prepare plaintext
-	const filenameBytes = new TextEncoder().encode(filename);
-	const filenameLengthBytes = new Uint8Array(2);
-	new DataView(filenameLengthBytes.buffer).setUint16(0, filenameBytes.length);
-
-	const plaintext = new Uint8Array([...filenameLengthBytes, ...filenameBytes, ...content]);
-
-	// Generate nonce
-	const nonce = crypto.getRandomValues(new Uint8Array(12));
-
-	// Import key
-	const key = await crypto.subtle.importKey('raw', fileKey, { name: 'AES-GCM' }, false, ['encrypt']);
-
-	// Encrypt
-	const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plaintext);
-
-	// Build file format
-	const magic = new TextEncoder().encode('SECF');
-	const version = new Uint8Array([0x01]);
-	const encryptedArray = new Uint8Array(encrypted);
-
-	return new Uint8Array([...magic, ...version, ...nonce, ...encryptedArray]);
-}
-```
-
-**File Decryption:**
-
-```javascript
-async function decryptFile(encryptedFile, fileKey) {
-	// Parse format
-	const magic = encryptedFile.slice(0, 4);
-	const version = encryptedFile[4];
-	const nonce = encryptedFile.slice(5, 17);
-	const ciphertext = encryptedFile.slice(17);
-
-	// Verify magic
-	const expectedMagic = new TextEncoder().encode('SECF');
-	if (!arraysEqual(magic, expectedMagic)) {
-		throw new Error('Invalid file format');
-	}
-
-	// Import key
-	const key = await crypto.subtle.importKey('raw', fileKey, { name: 'AES-GCM' }, false, ['decrypt']);
-
-	// Decrypt
-	const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, ciphertext);
-
-	const plaintextArray = new Uint8Array(plaintext);
-
-	// Parse plaintext
-	const filenameLength = new DataView(plaintextArray.buffer).getUint16(0);
-	const filename = new TextDecoder().decode(plaintextArray.slice(2, 2 + filenameLength));
-	const content = plaintextArray.slice(2 + filenameLength);
-
-	return { filename, content };
-}
-```
-
----
-
-### Server Implementation (Python/Flask)
-
-**Dependencies:**
-
-```python
-from flask import Flask, request, jsonify
-import jwt
-import hmac
-import hashlib
-import secrets
-from cryptography.hazmat.primitives.asymmetric import ed25519
-import time
-```
-
-**Blind Index:**
-
-```python
-def compute_owner_hash(client_id: str, pepper: str) -> str:
-    """Compute blind index for owner."""
-    h = hmac.new(
-        pepper.encode(),
-        client_id.encode(),
-        hashlib.sha256
-    )
-    return h.hexdigest()
-```
-
-**Authentication Endpoint:**
-
-```python
-@app.route('/auth/token', methods=['POST'])
-def auth_token():
-    data = request.json
-    client_id = data.get('client_id')
-    challenge = data.get('challenge')
-    signature = data.get('signature')
-
-    # First request: generate challenge
-    if not challenge:
-        challenge_jwt = jwt.encode(
-            {
-                'nonce': secrets.token_hex(32),
-                'client_id': client_id,
-                'iat': int(time.time()),
-                'exp': int(time.time()) + 300  # 5 minutes
-            },
-            JWT_SECRET,
-            algorithm='HS256'
-        )
-        return {'challenge': challenge_jwt}
-
-    # Second request: verify and issue token
-    try:
-        # Verify challenge JWT
-        challenge_data = jwt.decode(
-            challenge,
-            JWT_SECRET,
-            algorithms=['HS256']
-        )
-
-        if challenge_data['client_id'] != client_id:
-            return {'error': 'Invalid challenge'}, 400
-
-        # Get client's public key
-        user = db.get_user(client_id)
-        if not user:
-            return {'error': 'User not found'}, 404
-
-        public_key_bytes = base64.b64decode(user['public_key'])
-        public_key = ed25519.Ed25519PublicKey.from_public_bytes(
-            public_key_bytes
-        )
-
-        # Verify signature
-        signature_bytes = base64.b64decode(signature)
-        try:
-            public_key.verify(
-                signature_bytes,
-                challenge.encode()
-            )
-        except Exception:
-            return {'error': 'Invalid signature'}, 401
-
-        # Issue access token
-        access_token = jwt.encode(
-            {
-                'sub': client_id,
-                'iat': int(time.time()),
-                'exp': int(time.time()) + 3600  # 1 hour
-            },
-            JWT_SECRET,
-            algorithm='HS256'
-        )
-
-        return {
-            'token': access_token,
-            'expires_in': 3600
-        }
-
-    except jwt.ExpiredSignatureError:
-        return {'error': 'Challenge expired'}, 400
-    except jwt.InvalidTokenError:
-        return {'error': 'Invalid challenge'}, 400
-```
-
-**File Authorization:**
-
-```python
-def require_file_owner(file_id: str):
-    """Decorator to check file ownership."""
-    def decorator(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            # Get client_id from JWT
-            token = request.headers.get('Authorization', '').replace('Bearer ', '')
-            try:
-                payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
-                client_id = payload['sub']
-            except:
-                return {'error': 'Invalid token'}, 401
-
-            # Get file
-            file = db.get_file(file_id)
-            if not file:
-                return {'error': 'File not found'}, 404
-
-            # Check ownership
-            owner_hash = compute_owner_hash(client_id, SERVER_PEPPER)
-            if file['owner_hash'] != owner_hash:
-                return {'error': 'Not file owner'}, 403
-
-            return f(*args, **kwargs)
-        return wrapper
-    return decorator
-
-@app.route('/file/<file_id>', methods=['PUT'])
-@require_file_owner
-def update_file(file_id):
-    data = request.get_data()
-    db.update_file(file_id, data)
-    return {'success': True}
-```
-
----
-
-### Testing Checklist
-
-- [ ] User registration creates keychain
-- [ ] Authentication challenge expires after 5 minutes
-- [ ] Invalid signature rejected
-- [ ] File encryption/decryption works correctly
-- [ ] Only owner can modify/delete files
-- [ ] Anyone can read files (with file ID)
-- [ ] Keychain updates after file creation/deletion
-- [ ] Blind index correctly maps users to files
-- [ ] JWT expires after 1 hour
-- [ ] Rate limiting prevents abuse
-- [ ] File format version handled correctly
-- [ ] Large files (>100MB) work
-- [ ] Unicode filenames supported
-- [ ] Concurrent file operations handled
-- [ ] Server pepper rotation tested
-
----
-
-### Future Enhancements
-
-1. **Two-Factor Authentication**
-   - TOTP (time-based one-time passwords)
-   - WebAuthn/Passkeys
-   - Backup codes
-
-2. **Key Recovery**
-   - Recovery keys (encrypted with separate passphrase)
-   - Social recovery (Shamir's Secret Sharing)
-   - Encrypted key escrow (with user consent)
-
-3. **Advanced Sharing**
-   - Time-limited access (encrypt FK with time-based key)
-   - Password-protected shares
-   - View counters
-   - Expiring shares
-
-4. **File Versioning**
-   - Store multiple versions per file
-   - Version history in keychain
-   - Rollback capability
-
-5. **Collaborative Editing**
-   - Operational transforms or CRDTs
-   - Real-time sync
-   - Conflict resolution
-
-6. **Mobile Apps**
-   - Native iOS/Android clients
-   - Biometric unlock
-   - Offline mode with sync
-
-7. **Performance Optimizations**
-   - Chunked uploads for large files
-   - Resumable uploads
-   - Differential sync
-   - Client-side compression before encryption
-
-8. **Audit Logs**
-   - Optional encrypted audit trail
-   - User-visible access logs
-   - Anomaly detection
-
-9. **Search**
-   - Client-side encrypted search index
-   - Tag support
-   - Full-text search with privacy
-
-10. **Compliance**
-    - GDPR compliance tools
-    - Data export
-    - Right to deletion
-    - Transparency reports
-
----
-
-## Glossary
-
-| Term                  | Definition                                                                            |
-| --------------------- | ------------------------------------------------------------------------------------- |
-| **E2EE**              | End-to-End Encryption - encryption that occurs on client, server never sees plaintext |
-| **Zero-Knowledge**    | Server has no knowledge of encrypted content or encryption keys                       |
-| **Blind Index**       | Hashed identifier that allows querying without revealing actual value                 |
-| **Master Key (MK)**   | Root key derived from passphrase, used to derive all other keys                       |
-| **File Key (FK)**     | Symmetric key used to encrypt a single file                                           |
-| **Keychain Key (KK)** | Symmetric key used to encrypt the keychain file                                       |
-| **Auth Key Pair**     | Ed25519 public/private key pair for authentication                                    |
-| **HKDF**              | HMAC-based Key Derivation Function                                                    |
-| **AEAD**              | Authenticated Encryption with Associated Data (e.g., AES-GCM)                         |
-| **Nonce**             | Number used once - random value for encryption                                        |
-| **IV**                | Initialization Vector - same as nonce                                                 |
-| **JWT**               | JSON Web Token - signed token for authentication                                      |
-| **HMAC**              | Hash-based Message Authentication Code                                                |
-
----
-
-## Appendix A: Cryptographic Parameters
-
-### Argon2id
-
-```
-Version: 0x13
-Type: Argon2id
-Time cost: 3 iterations
-Memory cost: 64 MB (65536 KB)
-Parallelism: 4 threads
-Salt: username (variable length)
-Hash length: 32 bytes
-```
-
-### Ed25519
-
-```
-Curve: Curve25519
-Private key: 32 bytes
-Public key: 32 bytes
-Signature: 64 bytes
-```
-
-### AES-256-GCM
-
-```
-Key size: 256 bits (32 bytes)
-Nonce size: 96 bits (12 bytes)
-Tag size: 128 bits (16 bytes)
-```
-
-### HKDF
-
-```
-Hash: SHA-256
-Salt: empty string ""
-Info: Context-specific string (e.g., "auth-v1")
-Output length: 32 bytes
-```
-
-### HMAC-SHA256
-
-```
-Hash: SHA-256
-Output length: 32 bytes (256 bits)
-```
-
----
-
-## Appendix B: API Response Codes
-
-| Code | Meaning               | When                                        |
-| ---- | --------------------- | ------------------------------------------- |
-| 200  | OK                    | Successful request                          |
-| 201  | Created               | Resource created (POST /client, POST /file) |
-| 400  | Bad Request           | Invalid input, expired challenge            |
-| 401  | Unauthorized          | Invalid JWT, invalid signature              |
-| 403  | Forbidden             | Not file owner                              |
-| 404  | Not Found             | File or user not found                      |
-| 409  | Conflict              | Duplicate resource                          |
-| 413  | Payload Too Large     | File exceeds size limit                     |
-| 429  | Too Many Requests     | Rate limit exceeded                         |
-| 500  | Internal Server Error | Server error                                |
-
----
-
-## Appendix C: Security Audit Checklist
-
-### Cryptography
-
-- [ ] Using approved algorithms (AES-256-GCM, Ed25519, Argon2)
-- [ ] Nonces never reused
-- [ ] Keys properly derived (HKDF)
-- [ ] Secure random number generation
-- [ ] Proper key lengths
-- [ ] Authentication tags verified
-
-### Implementation
-
-- [ ] No key material in logs
-- [ ] Constant-time comparisons
-- [ ] Memory cleared after use
-- [ ] No timing side-channels
-- [ ] Input validation on all endpoints
-- [ ] SQL injection prevention
-- [ ] XSS prevention
-
-### Infrastructure
-
-- [ ] TLS 1.3 enforced
-- [ ] HSTS enabled
-- [ ] Secure headers (CSP, X-Frame-Options)
-- [ ] Rate limiting configured
-- [ ] Logging (without sensitive data)
-- [ ] Backup encryption
-- [ ] Access control on server
-
-### Operations
-
-- [ ] Incident response plan
-- [ ] Key rotation procedures
-- [ ] Backup/recovery tested
-- [ ] Monitoring and alerting
-- [ ] Regular security audits
-- [ ] Dependency updates
-- [ ] Vulnerability disclosure policy
-
----
-
-**End of Document**

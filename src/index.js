@@ -703,7 +703,7 @@ async function handleAuthToken(request, env, corsHeaders) {
 			return jsonResponse({ error: rateLimitCheck.error }, rateLimitCheck.status, corsHeaders);
 		}
 
-		const nonce = randomHex(32); // 64 character hex string
+		const nonce = randomHex(32);
 
 		const challengeJWT = await createJWT(
 			{ nonce, user_id: user.user_id, username: user.username, salt: user.salt },
