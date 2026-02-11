@@ -326,125 +326,130 @@ Authorization: Bearer <JWT>
 
 ---
 
-#### 5. Create File
+#### 5. Initiate File Upload
 
 **Request:**
 
 ```http
-POST /file
+POST /files
 Authorization: Bearer <JWT>
-Content-Type: application/octet-stream
+Content-Type: application/json
 
-<binary_encrypted_file_data>
+{
+    "total_size": 104857600
+}
 ```
 
 **Response:**
 
 ```json
 {
-	"file_id": "uuid"
+	"file_id": "uuid",
+	"upload_id": "r2_multipart_upload_id"
 }
 ```
 
 **Description:**
 
-- Creates a new file owned by authenticated user
-- File data must be encrypted client-side before upload
-- Server generates unique file ID
-- Server computes owner hash from JWT
+- Initiates a multipart upload session
+- Server generates unique `file_id` and creates R2 multipart upload
+- Client will upload chunks separately using presigned URLs
 
 **Server Actions:**
 
 1. Extract `user_id` from JWT
-2. Compute `owner_hash = HMAC(user_id, server_pepper)`
+2. Compute `owner_hash = HMAC-SHA256(user_id, server_pepper)`
 3. Generate unique `file_id`
-4. Store file with metadata:
-   - `file_id`
-   - `owner_hash`
-   - `created_at`
-   - `updated_at`
-   - `size`
-   - `data` (encrypted blob)
-5. Return `file_id`
+4. Initiate R2 multipart upload, get `upload_id`
+5. Store pending upload: `file_id` → `owner_hash`, `upload_id`, `total_chunks`, `status: pending`
+6. Return `file_id` and `upload_id`
 
 **Client Actions After:**
 
 1. Generate random File Key (FK)
-2. Update local keychain with new entry: `{file_id: {key: FK, filename: ...}}`
-3. Encrypt keychain with Keychain Key (KK)
-4. Upload updated keychain via `PUT /file/{keychain_id}`
+2. Encrypt file in chunks with FK (see File Format section)
+3. Upload metadata (part 0) and encrypted chunks (parts 1-N) using presigned URLs
+4. Complete upload
+5. Update local keychain with new entry: `{file_id: {key: FK, filename: ...}}`
+6. Encrypt keychain with Keychain Key (KK)
+7. Upload updated keychain via `PUT /files/{keychain_id}/complete` after getting upload URLs
+
+**Security:**
+
+- Server cannot read file contents (encrypted with FK)
+- Owner hash prevents non-owners from modifying file
 
 ---
 
-#### 6. Get File
+#### 6. Get Presigned Upload URL
 
 **Request:**
 
 ```http
-GET /file/{file_id}
-Authorization: Bearer <JWT> (optional)
+GET /files/{file_id}/upload/{part_number}
+Authorization: Bearer <JWT>
 ```
+
+**Parameters:**
+
+- `file_id`: The file ID from initiate upload
+- `part_number`: Part number (0 for metadata, 1-N for data chunks)
 
 **Response:**
 
-```
-Content-Type: application/octet-stream
-Content-Length: <size>
-
-<binary_encrypted_file_data>
-```
-
-**Description:**
-
-- Anyone can download any file if they know the file ID
-- Authorization optional (supports anonymous read)
-- Cannot decrypt without the File Key (FK)
-- Enables read-only sharing
-
-**Use Cases:**
-
-- Owner downloads their own file
-- Shared user downloads file (has FK but not owner)
-- Public file access (if file ID is public)
-
----
-
-#### 7. Get File Metadata
-
-**Request:**
-
-```http
-HEAD /file/{file_id}
-Authorization: Bearer <JWT> (optional)
-```
-
-**Response Headers:**
-
-```
-Content-Length: 12345
-Last-Modified: Tue, 03 Feb 2026 10:00:00 GMT
-X-Created-At: 2026-02-03T10:00:00Z
-X-Updated-At: 2026-02-03T10:00:00Z
+```json
+{
+	"url": "https://bucket.r2.cloudflarestorage.com/...",
+	"expires_in": 3600
+}
 ```
 
 **Description:**
 
-- Returns file metadata without downloading content
-- Useful for checking file size before download
-- No body in response
+- Returns a presigned URL for uploading a specific part
+- URL expires in 1 hour
+- Client uploads directly to R2 using PUT request
+- Part 0 is always the metadata JSON
+- Parts 1 "total_chunks": 21
+  through N are encrypted file chunks
+- Client stores ETags returned from each PUT request for completion
+
+**Server Actions:**
+
+1. Verify user owns the file (compare JWT user_id hash with stored owner_hash)
+2. Verify upload is in `pending` state
+3. Generate presigned R2 URL for part: `{file_id}/part_{part_number}`
+4. Return URL with expiration
+
+**Security:**
+
+- Only file owner can get upload URLs
+- Presigned URLs are time-limited
+- Each part requires a separate URL
 
 ---
 
-#### 8. Update File
+#### 7. Complete File Upload
 
 **Request:**
 
 ```http
-PUT /file/{file_id}
+POST /files/{file_id}/complete
 Authorization: Bearer <JWT>
-Content-Type: application/octet-stream
+Content-Type: application/json
 
-<binary_encrypted_file_data>
+{
+    "parts": [
+        {
+            "part_number": 0,
+            "etag": "\"abc123...\""
+        },
+        {
+            "part_number": 1,
+            "etag": "\"def456...\""
+        }
+    ]
+}
 ```
 
 **Response:**
@@ -452,33 +457,128 @@ Content-Type: application/octet-stream
 ```json
 {
 	"success": true,
-	"updated_at": "2026-02-03T12:00:00Z"
+	"file_id": "uuid",
+	"size": 104857600,
+	"created_at": "2026-02-08T10:00:00Z"
 }
 ```
 
 **Description:**
 
-- Only file owner can update
-- Replaces entire file content
-- Updates `updated_at` timestamp
+- Completes the multipart upload in R2
+- Combines all parts into final file
+- Marks file as available
+- All parts must be uploaded before calling this endpoint
 
-**Server Authorization:**
+**Server Actions:**
 
-```python
-owner_hash = HMAC(jwt.sub, server_pepper)
-file = db.get_file(file_id)
-if file.owner_hash != owner_hash:
-    return 403 Forbidden
-```
+1. Verify user owns the file
+2. Verify all expected parts (0 through total_chunks-1) are present in request
+3. Complete R2 multipart upload with provided ETags
+4. Update file status to `complete`
+5. Store final file size and creation timestamp
+6. Return success
+
+**Security:**
+
+- Only file owner can complete upload
+- Server verifies all parts are present
 
 ---
 
-#### 9. Delete File
+#### 8. Get File Download URL
 
 **Request:**
 
 ```http
-DELETE /file/{file_id}
+GET /files/{file_id}/download/{part_number}
+Authorization: Bearer <JWT> (optional)
+```
+
+**Parameters:**
+
+- `file_id`: The file ID to download
+- `part_number`: Part number (0 for metadata, 1-N for data chunks)
+
+**Response:**
+
+```json
+{
+	"url": "https://bucket.r2.cloudflarestorage.com/...",
+	"expires_in": 3600
+}
+```
+
+**Description:**
+
+- Returns a presigned URL for downloading a specific part
+- Anyone can download any file if they know the file ID (read-only sharing)
+- Authorization optional (supports anonymous read)
+- Client downloads part 0 first to get metadata, then downloads encrypted chunks
+- URL expires in 1 hour
+
+**Server Actions:**
+
+1. Verify file exists and is `complete`
+2. Generate presigned R2 download URL for part: `{file_id}/part_{part_number}`
+3. Return URL with expiration
+
+**Client Actions:**
+
+1. Download metadata (part 0)
+2. Parse metadata to get chunk count and encryption parameters
+3. Download encrypted chunks (parts 1-N) in parallel if desired
+4. Decrypt each chunk with File Key (FK) from keychain
+5. Combine decrypted chunks into final file
+
+---
+
+#### 9. Update File
+
+**Request:**
+
+```http
+PUT /files/{file_id}
+Authorization: Bearer <JWT>
+Content-Type: application/json
+
+{
+    "total_size": 104857600
+}
+```
+
+**Response:**
+
+```json
+{
+	"upload_id": "r2_multipart_upload_id"
+}
+```
+
+**Description:**
+
+- Initiates a new multipart upload for replacing an existing file
+- Same process as creating a new file, but replaces existing file_id
+- Only file owner can update
+- After completion, old file parts are deleted
+
+**Server Actions:**
+
+1. Verify user owns file (check owner_hash)
+2. Mark old file as `replacing`
+3. Initiate new R2 multipart upload
+4. Return `upload_id`
+5. Client follows same upload process (get URLs for each part, upload, complete)
+6. After successful completion, delete old file parts
+
+---
+
+#### 10. Delete File
+
+**Request:**
+
+```http
+DELETE /files/{file_id}
 Authorization: Bearer <JWT>
 ```
 
@@ -492,79 +592,118 @@ Authorization: Bearer <JWT>
 
 **Description:**
 
+- Deletes file and all its parts from R2
 - Only file owner can delete
-- Permanently removes file and metadata
 
-**Server Authorization:**
+**Server Actions:**
 
-```python
-owner_hash = HMAC(jwt.sub, server_pepper)
-file = db.get_file(file_id)
-if file.owner_hash != owner_hash:
-    return 403 Forbidden
-db.delete_file(file_id)
-```
+1. Verify user owns file (check owner_hash)
+2. Delete all file parts from R2: `{file_id}/part_*`
+3. Delete file metadata from database
+4. Return success
 
 **Client Actions After:**
 
 1. Remove file entry from keychain
 2. Encrypt keychain with KK
-3. Upload updated keychain via `PUT /file/{keychain_id}`
+3. Upload updated keychain using same multipart process
 
 ---
 
 ## Data Formats
 
-### File Format
+### File Format (Version 2)
 
-Binary format for encrypted files:
+Files are stored in R2 as multiple parts using multipart upload. Each logical file consists of:
 
-```
-┌─────────────────────────────────────────┐
-│ Magic Bytes (4 bytes): "SECF"          │
-├─────────────────────────────────────────┤
-│ Version (1 byte): 0x01                  │
-├─────────────────────────────────────────┤
-│ Nonce (12 bytes): random IV             │
-├─────────────────────────────────────────┤
-│ Encrypted Payload (variable):          │
-│   ┌───────────────────────────────────┐ │
-│   │ Filename Length (2 bytes)         │ │
-│   ├───────────────────────────────────┤ │
-│   │ Filename (UTF-8, variable)        │ │
-│   ├───────────────────────────────────┤ │
-│   │ File Content (variable)           │ │
-│   └───────────────────────────────────┘ │
-├─────────────────────────────────────────┤
-│ Auth Tag (16 bytes): GCM tag            │
-└─────────────────────────────────────────┘
+#### Part 0: Metadata (JSON)
 
-Total: 33 + filename_length + content_length bytes
+```json
+{
+	"magic": "SECF",
+	"version": 2,
+	"baseNonce": [12, 34, 56, ...],
+	"chunkSize": 5242880,
+	"filename": "example.pdf",
+	"originalSize": 15728640,
+	"totalChunks": 3
+}
 ```
 
-**Encryption:**
+**Fields:**
+
+| Field        | Type     | Description                                |
+| ------------ | -------- | ------------------------------------------ |
+| magic        | string   | Always "SECF" (Secure Encrypted File)      |
+| version      | number   | Format version (2 for multipart)           |
+| baseNonce    | number[] | 12-byte base nonce as array                |
+| chunkSize    | number   | Plaintext chunk size in bytes (e.g., 5MB)  |
+| filename     | string   | Original filename                          |
+| originalSize | number   | Original file size before encryption       |
+| totalChunks  | number   | Number of data chunks (excluding metadata) |
+
+#### Parts 1-N: Encrypted Data Chunks
+
+Each data chunk is encrypted with AES-256-GCM:
 
 ```
-plaintext = filename_length || filename || content
-ciphertext, tag = AES-256-GCM.encrypt(
-    key=FK,
-    plaintext=plaintext,
-    nonce=nonce,
-    additional_data=b""
-)
+┌─────────────────────────────────────────────────────────────┐
+│ Encrypted Data (chunkSize bytes, except last chunk)        │
+├─────────────────────────────────────────────────────────────┤
+│ Auth Tag (16 bytes): AES-GCM authentication tag            │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**File Structure Details:**
+**Chunk Nonce Derivation:**
 
-| Field           | Size     | Description                    |
-| --------------- | -------- | ------------------------------ |
-| Magic           | 4 bytes  | `SECF` (Secure Encrypted File) |
-| Version         | 1 byte   | Format version (0x01)          |
-| Nonce           | 12 bytes | Random nonce/IV for AES-GCM    |
-| Filename Length | 2 bytes  | Big-endian uint16 (max 65535)  |
-| Filename        | Variable | UTF-8 encoded filename         |
-| Content         | Variable | Raw file content               |
-| Auth Tag        | 16 bytes | AES-GCM authentication tag     |
+Each chunk has a unique nonce derived from the base nonce and chunk index:
+
+```
+chunkNonce[0-7] = baseNonce[0-7]
+chunkNonce[8-11] = chunk_index (uint32, big-endian)
+
+Where:
+- Part 1 = chunk index 0
+- Part 2 = chunk index 1
+- Part N = chunk index (N-1)
+```
+
+**Encryption Per Chunk:**
+
+```javascript
+// For each chunk
+const chunkNonce = new Uint8Array(12);
+chunkNonce.set(baseNonce); // Copy base nonce
+new DataView(chunkNonce.buffer).setUint32(8, chunkIndex, false); // Add index
+
+const encryptedChunk = AES-256-GCM.encrypt(
+	key: FK,
+	plaintext: chunkData,
+	nonce: chunkNonce,
+	additional_data: none
+);
+// Returns: encrypted_data || auth_tag (chunkSize + 16 bytes)
+```
+
+**Complete File Structure in R2:**
+
+```
+files/{file_id}/part_0      → Metadata JSON
+files/{file_id}/part_1      → Encrypted chunk 0 + tag
+files/{file_id}/part_2      → Encrypted chunk 1 + tag
+files/{file_id}/part_N      → Encrypted chunk (N-1) + tag
+```
+
+**Comparison with Version 1:**
+
+| Feature                  | Version 1            | Version 2                              |
+| ------------------------ | -------------------- | -------------------------------------- |
+| Storage                  | Single blob          | Multiple parts                         |
+| Encryption               | Entire file at once  | Chunked encryption                     |
+| Resume capability        | ❌ No                | ✅ Yes                                 |
+| Parallel upload/download | ❌ No                | ✅ Yes                                 |
+| Memory efficiency        | ❌ Loads entire file | ✅ Streams chunks                      |
+| Max file size            | Limited by memory    | Unlimited (practical limit: R2 limits) |
 
 ---
 
@@ -580,13 +719,13 @@ The keychain is a special file (stored at `keychain_id` returned during registra
 	"files": {
 		"file_id_1": {
 			"key": "hex_encoded_32_byte_key",
-			"filename": "encrypted_base64_filename",
+			"filename": "document.pdf",
 			"created": "2026-02-03T10:00:00Z",
 			"size": 12345
 		},
 		"file_id_2": {
 			"key": "hex_encoded_32_byte_key",
-			"filename": "encrypted_base64_filename",
+			"filename": "photo.jpg",
 			"created": "2026-02-03T11:00:00Z",
 			"size": 67890
 		}
@@ -706,12 +845,20 @@ CREATE TABLE users (
 CREATE TABLE files (
     file_id VARCHAR(36) PRIMARY KEY,         -- UUID
     owner_hash VARCHAR(64) NOT NULL,         -- HMAC(user_id, pepper)
-    data BYTEA NOT NULL,                     -- Encrypted file blob
-    size INTEGER NOT NULL,                   -- File size in bytes
+    upload_id VARCHAR(255),                  -- R2 multipart upload ID
+    total_chunks INTEGER NOT NULL,           -- Total number of parts (including metadata)
+    size BIGINT,                             -- Final file size in bytes (set after completion)
+    status VARCHAR(20) DEFAULT 'pending',    -- 'pending', 'complete', 'replacing'
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
-    INDEX idx_owner_hash (owner_hash)
+    completed_at TIMESTAMP,                  -- When upload was completed
+    INDEX idx_owner_hash (owner_hash),
+    INDEX idx_status (status)
 );
+
+-- Note: Actual file data is stored in R2 at:
+-- - {file_id}/part_0 (metadata JSON)
+-- - {file_id}/part_1 through part_N (encrypted chunks)
 ```
 
 **Server Configuration:**
@@ -865,51 +1012,102 @@ CREATE TABLE anonymous_download_limits (
     │ 1. User selects file to upload            │
     │    filename = "document.pdf"               │
     │    content = <binary data>                 │
+    │    size = 50MB                             │
     │                                            │
-    │ 2. Generate random file key                │
+    │ 2. Calculate chunks                        │
+    │    CHUNK_SIZE = 5MB                        │
+    │    totalChunks = ceil(size / CHUNK_SIZE) = 10
+    │                                            │
+    │ 3. Generate random file key                │
     │    FK = random(32 bytes)                   │
+    │    baseNonce = random(12 bytes)            │
     │                                            │
-    │ 3. Encrypt file                            │
-    │    plaintext = len(filename) || filename || content
-    │    nonce = random(12)                      │
-    │    encrypted, tag = AES-GCM(FK, plaintext, nonce)
-    │    file_data = "SECF" || 0x01 || nonce || encrypted || tag
-    │                                            │
-    │ 4. POST /file                              │
-    │    Headers: Authorization: Bearer <token>  │
-    │    Body: file_data                         │
+    │ 4. POST /files                             │
+    │    {total_size: 50MB, total_chunks: 11}    │
+    │    (11 = 1 metadata + 10 data chunks)      │
     ├───────────────────────────────────────────►│
     │                                            │
-    │                                            │ 5. Create file
+    │                                            │ 5. Initiate multipart upload
     │                                            │    file_id = UUID()
     │                                            │    owner_hash = HMAC(jwt.sub, pepper)
-    │                                            │    Store file
+    │                                            │    upload_id = R2.createMultipartUpload()
     │                                            │
-    │ 6. {file_id}                               │
+    │ 6. {file_id, upload_id}                    │
     │◄───────────────────────────────────────────┤
     │                                            │
-    │ 7. Update keychain                         │
-    │    Download keychain                       │
-    │    GET /file/{keychain_id}                 │
+    │ 7. Upload metadata (part 0)                │
+    │    GET /files/{file_id}/upload/0           │
+    ├───────────────────────────────────────────►│
+    │                                            │
+    │                                            │ 8. Generate presigned URL
+    │                                            │
+    │ 9. {url: presigned_url_part_0}             │
+    │◄───────────────────────────────────────────┤
+    │                                            │
+    │ 10. Create metadata JSON                   │
+    │     metadata = {                           │
+    │       magic: "SECF",                       │
+    │       version: 2,                          │
+    │       baseNonce: [12,34,56,...],           │
+    │       chunkSize: 5242880,                  │
+    │       filename: "document.pdf",            │
+    │       originalSize: 50000000,              │
+    │       totalChunks: 10                      │
+    │     }                                      │
+    │                                            │
+    │ 11. PUT presigned_url_part_0               │
+    │     Body: JSON.stringify(metadata)         │
+    ├──────────────────────────────────────────► R2
+    │                           ETag_0 ◄─────────┤
+    │                                            │
+    │ 12. For each chunk (parallel):             │
+    │     a. Get presigned URL                   │
+    │        GET /files/{file_id}/upload/{N}     │
     ├───────────────────────────────────────────►│
     │◄───────────────────────────────────────────┤
     │                                            │
-    │ 8. Decrypt keychain with KK                │
-    │    keychain = decrypt(keychain_data, KK)   │
+    │     b. Encrypt chunk                       │
+    │        chunkNonce = baseNonce + index      │
+    │        encrypted = AES-GCM(FK, chunk, chunkNonce)
     │                                            │
-    │ 9. Add new file entry                      │
-    │    keychain.files[file_id] = {             │
-    │        key: FK.hex(),                      │
-    │        filename: base64(encrypt(filename)),│
-    │        created: now(),                     │
-    │        size: file_size                     │
-    │    }                                       │
+    │     c. PUT presigned_url_part_N            │
+    │        Body: encrypted                     │
+    ├──────────────────────────────────────────► R2
+    │                         ETag_N ◄───────────┤
     │                                            │
-    │ 10. Re-encrypt and upload keychain         │
-    │     encrypted_keychain = encrypt(keychain, KK)
-    │     PUT /file/{keychain_id}                │
+    │ 13. POST /files/{file_id}/complete         │
+    │     {parts: [{part_number: 0, etag: ETag_0},
+    │              {part_number: 1, etag: ETag_1},
+    │              ...]}                         │
+    ├───────────────────────────────────────────►│
+    │                                            │
+    │                                            │ 14. Complete multipart upload
+    │                                            │     R2.completeMultipartUpload()
+    │                                            │     Update file status: complete
+    │                                            │
+    │ 15. {success: true, file_id, size}         │
+    │◄───────────────────────────────────────────┤
+    │                                            │
+    │ 16. Update keychain                        │
+    │     Download keychain                      │
+    │     GET /files/{keychain_id}/download/0    │
     ├───────────────────────────────────────────►│
     │◄───────────────────────────────────────────┤
+    │                                            │
+    │ 17. Decrypt keychain with KK               │
+    │     keychain = decrypt(keychain_data, KK)  │
+    │                                            │
+    │ 18. Add new file entry                     │
+    │     keychain.files[file_id] = {            │
+    │         key: FK.hex(),                     │
+    │         filename: "document.pdf",          │
+    │         created: now(),                    │
+    │         size: 50000000                     │
+    │     }                                      │
+    │                                            │
+    │ 19. Re-encrypt and upload keychain         │
+    │     (Same multipart process)               │
+    │     Initiate → Upload parts → Complete     │
     │                                            │
     │ Done!                                      │
     │                                            │
@@ -935,35 +1133,67 @@ CREATE TABLE anonymous_download_limits (
     │ 4. [{file_id, size, created_at, ...}]     │
     │◄───────────────────────────────────────────┤
     │                                            │
-    │ 5. Download keychain                       │
-    │    GET /file/{keychain_id}                 │
+    │ 5. Download keychain metadata              │
+    │    GET /files/{keychain_id}/download/0     │
     ├───────────────────────────────────────────►│
     │◄───────────────────────────────────────────┤
     │                                            │
-    │ 6. Decrypt keychain                        │
+    │ 6. Get keychain download URLs              │
+    │    Get presigned URLs for all keychain parts
+    │    Download and decrypt keychain chunks    │
     │    keychain = decrypt(keychain_data, KK)   │
     │                                            │
     │ 7. Display files with names                │
     │    For each file in list:                  │
-    │      filename = decrypt(keychain.files[file_id].filename)
+    │      filename = keychain.files[file_id].filename
     │                                            │
     │ 8. User selects file to open               │
     │                                            │
-    │ 9. GET /file/{file_id}                     │
+    │ 9. Download file metadata (part 0)         │
+    │    GET /files/{file_id}/download/0         │
+    ├───────────────────────────────────────────►│
+    │                                            │
+    │                                            │ 10. Generate presigned URL
+    │                                            │
+    │ 11. {url: presigned_url_part_0}            │
+    │◄───────────────────────────────────────────┤
+    │                                            │
+    │ 12. Download and parse metadata            │
+    │     GET presigned_url_part_0              │
+    │◄──────────────────────────────────────────R2
+    │                                            │
+    │     metadata = {                           │
+    │       magic: "SECF",                       │
+    │       version: 2,                          │
+    │       baseNonce: [...],                    │
+    │       chunkSize: 5242880,                  │
+    │       filename: "document.pdf",            │
+    │       originalSize: 50000000,              │
+    │       totalChunks: 10                      │
+    │     }                                      │
+    │                                            │
+    │ 13. Get FK from keychain                   │
+    │     FK = hex_decode(keychain.files[file_id].key)
+    │                                            │
+    │ 14. For each encrypted chunk (parallel):   │
+    │     a. Get presigned URL                   │
+    │        GET /files/{file_id}/download/{N}   │
     ├───────────────────────────────────────────►│
     │◄───────────────────────────────────────────┤
     │                                            │
-    │ 10. Get FK from keychain                   │
-    │     FK = hex_decode(keychain.files[file_id].key)
+    │     b. Download encrypted chunk            │
+    │        GET presigned_url_part_N            │
+    │◄──────────────────────────────────────────R2
     │                                            │
-    │ 11. Decrypt file                           │
-    │     Parse file format                      │
-    │     plaintext = AES-GCM.decrypt(encrypted, FK, nonce, tag)
-    │     filename_len = plaintext[0:2]          │
-    │     filename = plaintext[2:2+len]          │
-    │     content = plaintext[2+len:]            │
+    │     c. Decrypt chunk                       │
+    │        chunkNonce = baseNonce + index      │
+    │        decrypted = AES-GCM.decrypt(        │
+    │          encrypted, FK, chunkNonce)        │
     │                                            │
-    │ 12. Display/download file                  │
+    │ 15. Combine all decrypted chunks           │
+    │     content = chunk_0 + chunk_1 + ...      │
+    │                                            │
+    │ 16. Display/download file                  │
     │                                            │
 ```
 
