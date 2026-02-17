@@ -4,9 +4,16 @@
  */
 import { handleCreateUser } from './handlers/user.js';
 import { handleAuthToken } from './handlers/auth.js';
-import { handleListFiles, handleCreateFile, handleUpdateFile, handleDeleteFile, handleGetFile } from './handlers/files.js';
+import { handleListFiles, handleCreateFile, handleDeleteFile } from './handlers/files.js';
+import {
+	handleCreateMultipartUpload,
+	handleGetMultipartUploadUrl,
+	handleCompleteMultipartUpload,
+	handleAbortMultipartUpload,
+} from './handlers/multipart.js';
 import { handleScheduled } from './schedule.js';
 import { jsonResponse } from './utils/response.js';
+import { getDownloadUrl } from './utils/multipart.js';
 
 export default {
 	async fetch(request, env) {
@@ -55,22 +62,50 @@ export default {
 				return await handleCreateFile(request, env, corsHeaders);
 			}
 
-			// Route: PUT /file/:file_id - Update file
-			const fileMatch = path.match(new RegExp(`^${apiBase}/file/([a-f0-9-]+)$`));
-			if (fileMatch && method === 'PUT') {
-				const fileId = fileMatch[1];
-				return await handleUpdateFile(request, env, corsHeaders, fileId);
-			}
-
-			if (fileMatch && method === 'DELETE') {
-				const fileId = fileMatch[1];
-				return await handleDeleteFile(request, env, corsHeaders, fileId);
-			}
-
 			// Route: GET /file/:file_id - Get file
+			const fileMatch = path.match(new RegExp(`^${apiBase}/file/([a-f0-9-]+)$`));
 			if (fileMatch && method === 'GET') {
 				const fileId = fileMatch[1];
-				return await handleGetFile(request, env, corsHeaders, fileId);
+				const downloadUrl = await getDownloadUrl(env.AWS_CLIENT, env.R2_URL, fileId, 300);
+
+				return jsonResponse({ downloadUrl }, 200, corsHeaders);
+			}
+
+			// Route: DELETE /file/:file_id - Delete file
+			if (fileMatch && method === 'DELETE') {
+				const fileId = fileMatch[1];
+				return await handleDeleteFile(request, env, fileId, corsHeaders);
+			}
+
+			// Route: GET /file/:file_id/upload - Start mulitpart upload and get upload ID
+			const fileUploadMatch = path.match(new RegExp(`^${apiBase}/file/([a-f0-9-]+)/upload$`));
+			if (fileUploadMatch && method === 'GET') {
+				const fileId = fileUploadMatch[1];
+				return await handleCreateMultipartUpload(request, env, fileId, corsHeaders);
+			}
+
+			// Route: POST /file/:file_id/upload/:upload_id - Complete multipart upload
+			const fileUploadCompleteMatch = path.match(new RegExp(`^${apiBase}/file/([a-f0-9-]+)/upload/([^/]+)$`));
+			if (fileUploadCompleteMatch && method === 'POST') {
+				const fileId = fileUploadCompleteMatch[1];
+				const uploadId = fileUploadCompleteMatch[2];
+				return await handleCompleteMultipartUpload(request, env, fileId, uploadId, corsHeaders);
+			}
+
+			// Route: DELETE /file/:file_id/upload/:upload_id - Abort multipart upload
+			if (fileUploadCompleteMatch && method === 'DELETE') {
+				const fileId = fileUploadCompleteMatch[1];
+				const uploadId = fileUploadCompleteMatch[2];
+				return await handleAbortMultipartUpload(request, env, fileId, uploadId, corsHeaders);
+			}
+
+			// Route: GET /upload/:upload_id/part/:partNumber - Get presigned URL for uploading a part
+			const filePartUploadMatch = path.match(new RegExp(`^${apiBase}/file/([a-f0-9-]+)/upload/([^/]+)/part/([0-9]+)$`));
+			if (filePartUploadMatch && method === 'GET') {
+				const fileId = filePartUploadMatch[1];
+				const uploadId = filePartUploadMatch[2];
+				const partNumber = filePartUploadMatch[3];
+				return await handleGetMultipartUploadUrl(request, env, fileId, uploadId, partNumber, corsHeaders);
 			}
 
 			// Default 404

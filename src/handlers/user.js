@@ -75,8 +75,8 @@ export async function handleCreateUser(request, env, corsHeaders) {
 
 	// Store file metadata in database
 	const owner_hash = await computeOwnerHash(user_id, env);
-	await env.DB.prepare('INSERT INTO files (file_id, owner_hash, size, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-		.bind(keychain_id, owner_hash, 0, new Date().toISOString(), new Date().toISOString())
+	await env.DB.prepare('INSERT INTO files (file_id, owner_hash, created_at, updated_at) VALUES (?, ?, ?, ?)')
+		.bind(keychain_id, owner_hash, new Date().toISOString(), new Date().toISOString())
 		.run();
 
 	// Return user_id to client

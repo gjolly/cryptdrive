@@ -326,7 +326,7 @@ Authorization: Bearer <JWT>
 
 ---
 
-#### 5. Initiate File Upload
+#### 5. Create File
 
 **Request:**
 
@@ -344,35 +344,20 @@ Content-Type: application/json
 
 ```json
 {
-	"file_id": "uuid",
-	"upload_id": "r2_multipart_upload_id"
+	"file_id": "uuid"
 }
 ```
 
 **Description:**
 
-- Initiates a multipart upload session
-- Server generates unique `file_id` and creates R2 multipart upload
-- Client will upload chunks separately using presigned URLs
+- Initiates a new file in the system
 
 **Server Actions:**
 
 1. Extract `user_id` from JWT
 2. Compute `owner_hash = HMAC-SHA256(user_id, server_pepper)`
 3. Generate unique `file_id`
-4. Initiate R2 multipart upload, get `upload_id`
-5. Store pending upload: `file_id` → `owner_hash`, `upload_id`, `total_chunks`, `status: pending`
-6. Return `file_id` and `upload_id`
-
-**Client Actions After:**
-
-1. Generate random File Key (FK)
-2. Encrypt file in chunks with FK (see File Format section)
-3. Upload metadata (part 0) and encrypted chunks (parts 1-N) using presigned URLs
-4. Complete upload
-5. Update local keychain with new entry: `{file_id: {key: FK, filename: ...}}`
-6. Encrypt keychain with Keychain Key (KK)
-7. Upload updated keychain via `PUT /files/{keychain_id}/complete` after getting upload URLs
+4. Return `file_id
 
 **Security:**
 
@@ -381,18 +366,44 @@ Content-Type: application/json
 
 ---
 
+#### 6. Initiate Multipart Upload
+
+**Request:**
+
+```http
+GET /files/{file_id}/upload
+Authorization: Bearer <JWT>
+```
+
+\*_Response:_
+
+```json
+{
+	"upload_id": "r2_multipart_upload_id"
+}
+```
+
+**Description:**
+
+- Initiates a multipart upload in R2 for the specified file
+
+**Server Actions:**
+
+1. Verify user owns the file (compare JWT user_id hash with stored owner_hash)
+2. Initiate multipart upload in R2 for key: `{file_id}`
+
 #### 6. Get Presigned Upload URL
 
 **Request:**
 
 ```http
-GET /files/{file_id}/upload/{part_number}
+GET /upload/{upload_id}/part/{part_number}
 Authorization: Bearer <JWT>
 ```
 
 **Parameters:**
 
-- `file_id`: The file ID from initiate upload
+- `upload_id`: The upload ID from initiate upload
 - `part_number`: Part number (0 for metadata, 1-N for data chunks)
 
 **Response:**
@@ -400,14 +411,14 @@ Authorization: Bearer <JWT>
 ```json
 {
 	"url": "https://bucket.r2.cloudflarestorage.com/...",
-	"expires_in": 3600
+	"expires_in": 300
 }
 ```
 
 **Description:**
 
 - Returns a presigned URL for uploading a specific part
-- URL expires in 1 hour
+- URL expires in 5 minutes
 - Client uploads directly to R2 using PUT request
 - Part 0 is always the metadata JSON
 - Parts 1 "total_chunks": 21
@@ -434,7 +445,7 @@ Authorization: Bearer <JWT>
 **Request:**
 
 ```http
-POST /files/{file_id}/complete
+POST /upload/{upload_id}
 Authorization: Bearer <JWT>
 Content-Type: application/json
 
@@ -486,12 +497,43 @@ Content-Type: application/json
 
 ---
 
+#### 7. Abort File Upload
+
+**Request:**
+
+```http
+DELETE /upload/{upload_id}
+Authorization: Bearer <JWT>
+```
+
+**Response:**
+
+```json
+{
+	"success": true
+}
+```
+
+**Description:**
+
+- Aborts a multipart upload in R2
+- Only file owner can abort
+
+**Server Actions:**
+
+1. Verify user owns the file (compare JWT user_id hash with stored owner_hash)
+2. Abort R2 multipart upload
+3. Mark upload as `aborted`
+4. Return success
+
+---
+
 #### 8. Get File Download URL
 
 **Request:**
 
 ```http
-GET /files/{file_id}/download/{part_number}
+GET /files/{file_id}
 Authorization: Bearer <JWT> (optional)
 ```
 
@@ -505,7 +547,7 @@ Authorization: Bearer <JWT> (optional)
 ```json
 {
 	"url": "https://bucket.r2.cloudflarestorage.com/...",
-	"expires_in": 3600
+	"expires_in": 300
 }
 ```
 
@@ -515,7 +557,7 @@ Authorization: Bearer <JWT> (optional)
 - Anyone can download any file if they know the file ID (read-only sharing)
 - Authorization optional (supports anonymous read)
 - Client downloads part 0 first to get metadata, then downloads encrypted chunks
-- URL expires in 1 hour
+- URL expires in 5 minutes
 
 **Server Actions:**
 

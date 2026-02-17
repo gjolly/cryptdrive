@@ -1,5 +1,5 @@
 import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import worker from '../src';
 
 const v1ApiPrefix = 'api/v1';
@@ -8,6 +8,15 @@ const v1ApiPrefix = 'api/v1';
 beforeEach(() => {
 	env.SERVER_PEPPER = 'test-server-pepper-32-bytes-for-hmac-sha256-security-ok';
 	env.JWT_SECRET = 'test-jwt-secret-key-32-bytes-for-hmac-sha256-signing-ok';
+});
+
+// TODO: we need a way to mock R2 because this is going
+// to be slow and exprensive.
+afterAll(async () => {
+	const files = Object.keys(env.BUCKET.list()?.objects || {});
+	for (const file of files) {
+		await env.BUCKET.delete(file);
+	}
 });
 
 describe('CryptDrive Worker', () => {
@@ -559,30 +568,20 @@ describe('CryptDrive Worker', () => {
 			const createUserRequest = new Request(`http://example.com/${v1ApiPrefix}/user`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ public_key: testPublicKey, keychain_id: crypto.randomUUID() }),
+				body: JSON.stringify({
+					public_key: testPublicKey,
+					username: 'testfileuser',
+					salt: 'testfilesalt',
+					keychain_id: crypto.randomUUID(),
+				}),
 			});
 
-			let ctx = createExecutionContext();
+			const ctx = createExecutionContext();
 			const createUserResponse = await worker.fetch(createUserRequest, env, ctx);
 			await waitOnExecutionContext(ctx);
 
 			const userData = await createUserResponse.json();
 			testUserId = userData.user_id;
-
-			// Get authentication challenge
-			const challengeRequest = new Request(`http://example.com/${v1ApiPrefix}/auth/token`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					public_key: testPublicKey,
-					challenge: null,
-					signature: null,
-				}),
-			});
-
-			ctx = createExecutionContext();
-			await worker.fetch(challengeRequest, env, ctx);
-			await waitOnExecutionContext(ctx);
 
 			// For testing, we'll manually create a valid token
 			// In real usage, the client would sign the challenge
@@ -592,7 +591,7 @@ describe('CryptDrive Worker', () => {
 			// Create a token directly (simulating successful authentication)
 			const now = Math.floor(Date.now() / 1000);
 			const payload = {
-				sub: testPublicKey,
+				sub: testUserId, // JWT subject should be user_id, not public_key
 				iat: now,
 				exp: now + 3600,
 			};
@@ -629,21 +628,22 @@ describe('CryptDrive Worker', () => {
 			const data = await response.json();
 			expect(data).toHaveProperty('files');
 			expect(Array.isArray(data.files)).toBe(true);
-			expect(data.files.length).toBe(0);
+			// User has 1 file (the keychain) created during registration
+			expect(data.files.length).toBe(1);
 		});
 
 		it('returns list of files owned by user', async () => {
 			// Insert some test files directly into the database
 			const fileId1 = crypto.randomUUID();
 			const fileId2 = crypto.randomUUID();
-			const ownerHash = await computeOwnerHashForTest(testPublicKey, env);
+			const ownerHash = await computeOwnerHashForTest(testUserId, env);
 
-			await env.DB.prepare('INSERT INTO files (file_id, owner_hash, size, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-				.bind(fileId1, ownerHash, 1234, '2026-02-03T10:00:00Z', '2026-02-03T10:00:00Z')
+			await env.DB.prepare('INSERT INTO files (file_id, owner_hash, created_at, updated_at) VALUES (?, ?, ?, ?)')
+				.bind(fileId1, ownerHash, '2026-02-03T10:00:00Z', '2026-02-03T10:00:00Z')
 				.run();
 
-			await env.DB.prepare('INSERT INTO files (file_id, owner_hash, size, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-				.bind(fileId2, ownerHash, 5678, '2026-02-03T11:00:00Z', '2026-02-03T11:00:00Z')
+			await env.DB.prepare('INSERT INTO files (file_id, owner_hash, created_at, updated_at) VALUES (?, ?, ?, ?)')
+				.bind(fileId2, ownerHash, '2026-02-03T11:00:00Z', '2026-02-03T11:00:00Z')
 				.run();
 
 			const request = new Request(`http://example.com/${v1ApiPrefix}/files`, {
@@ -657,16 +657,19 @@ describe('CryptDrive Worker', () => {
 
 			expect(response.status).toBe(200);
 			const data = await response.json();
-			expect(data.files).toHaveLength(2);
+			// User has 3 files: 1 keychain (created during registration) + 2 test files
+			expect(data.files).toHaveLength(3);
+
+			// Filter out the keychain to find our test files
+			const testFiles = data.files.filter((f) => f.file_id === fileId1 || f.file_id === fileId2);
+			expect(testFiles).toHaveLength(2);
 
 			// Should be sorted by created_at DESC
-			expect(data.files[0].file_id).toBe(fileId2);
-			expect(data.files[0].size).toBe(5678);
-			expect(data.files[0].created_at).toBe('2026-02-03T11:00:00Z');
-			expect(data.files[0].updated_at).toBe('2026-02-03T11:00:00Z');
+			expect(testFiles[0].file_id).toBe(fileId2);
+			expect(testFiles[0].created_at).toBe('2026-02-03T11:00:00Z');
+			expect(testFiles[0].updated_at).toBe('2026-02-03T11:00:00Z');
 
-			expect(data.files[1].file_id).toBe(fileId1);
-			expect(data.files[1].size).toBe(1234);
+			expect(testFiles[1].file_id).toBe(fileId1);
 		});
 
 		it('only returns files owned by authenticated user', async () => {
@@ -691,8 +694,8 @@ describe('CryptDrive Worker', () => {
 			// Insert files for both users
 			const myFileId = crypto.randomUUID();
 			const otherFileId = crypto.randomUUID();
-			const myOwnerHash = await computeOwnerHashForTest(testPublicKey, env);
-			const otherOwnerHash = await computeOwnerHashForTest(otherUserData.public_key, env);
+			const myOwnerHash = await computeOwnerHashForTest(testUserId, env);
+			const otherOwnerHash = await computeOwnerHashForTest(otherUserData.user_id, env);
 
 			await env.DB.prepare('INSERT INTO files (file_id, owner_hash, size, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
 				.bind(myFileId, myOwnerHash, 1111, '2026-02-03T10:00:00Z', '2026-02-03T10:00:00Z')
@@ -714,8 +717,11 @@ describe('CryptDrive Worker', () => {
 
 			expect(response.status).toBe(200);
 			const data = await response.json();
-			expect(data.files).toHaveLength(1);
-			expect(data.files[0].file_id).toBe(myFileId);
+			// User has 2 files: 1 keychain (created during registration) + 1 test file
+			expect(data.files).toHaveLength(2);
+			// Find the test file (not the keychain)
+			const testFile = data.files.find((f) => f.file_id === myFileId);
+			expect(testFile).toBeDefined();
 		});
 
 		it('rejects request without Authorization header', async () => {
@@ -787,32 +793,10 @@ describe('CryptDrive Worker', () => {
 		});
 
 		describe('POST /file - Create file', () => {
-			it('successfully creates a file with valid data', async () => {
-				// Create a properly formatted file with magic bytes, version, nonce, encrypted data, and tag
-				const magic = new TextEncoder().encode('SECF');
-				const version = new Uint8Array([0x01]);
-				const nonce = new Uint8Array(12);
-				crypto.getRandomValues(nonce);
-
-				// Simulated encrypted payload (filename_length + filename + content)
-				const filename = 'test.txt';
-				const filenameBytes = new TextEncoder().encode(filename);
-				const filenameLength = new Uint8Array(2);
-				new DataView(filenameLength.buffer).setUint16(0, filenameBytes.length, false);
-				const content = new TextEncoder().encode('Hello, World!');
-				const payload = new Uint8Array([...filenameLength, ...filenameBytes, ...content]);
-
-				// Simulated authentication tag (16 bytes)
-				const tag = new Uint8Array(16);
-				crypto.getRandomValues(tag);
-
-				// Combine all parts
-				const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
+			it('successfully creates a file metadata', async () => {
 				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
 					method: 'POST',
 					headers: { Authorization: `Bearer ${testToken}` },
-					body: fileData,
 				});
 
 				const ctx = createExecutionContext();
@@ -824,34 +808,19 @@ describe('CryptDrive Worker', () => {
 				expect(data.file_id).toBeDefined();
 				expect(data.file_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 
-				// Verify file was stored in R2
-				const storedFile = await env.BUCKET.get(data.file_id);
-				expect(storedFile).not.toBeNull();
-				const storedData = await storedFile.arrayBuffer();
-				expect(new Uint8Array(storedData)).toEqual(fileData);
-
 				// Verify metadata was stored in D1
 				const result = await env.DB.prepare('SELECT * FROM files WHERE file_id = ?').bind(data.file_id).first();
 
 				expect(result).not.toBeNull();
 				expect(result.file_id).toBe(data.file_id);
-				expect(result.owner_hash).toBe(await computeOwnerHashForTest(testPublicKey, env));
-				expect(result.size).toBe(fileData.byteLength);
+				expect(result.owner_hash).toBe(await computeOwnerHashForTest(testUserId, env));
 				expect(result.created_at).toBeDefined();
 				expect(result.updated_at).toBeDefined();
 			});
 
 			it('rejects request without authentication', async () => {
-				const magic = new TextEncoder().encode('SECF');
-				const version = new Uint8Array([0x01]);
-				const nonce = new Uint8Array(12);
-				const payload = new Uint8Array(20);
-				const tag = new Uint8Array(16);
-				const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
 				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
 					method: 'POST',
-					body: fileData,
 				});
 
 				const ctx = createExecutionContext();
@@ -863,102 +832,13 @@ describe('CryptDrive Worker', () => {
 				expect(data.error).toContain('Authorization header required');
 			});
 
-			it('rejects empty file data', async () => {
-				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
-					method: 'POST',
-					headers: { Authorization: `Bearer ${testToken}` },
-					body: new Uint8Array(0),
-				});
-
-				const ctx = createExecutionContext();
-				const response = await worker.fetch(request, env, ctx);
-				await waitOnExecutionContext(ctx);
-
-				expect(response.status).toBe(400);
-				const data = await response.json();
-				expect(data.error).toBe('File data is required');
-			});
-
-			it('rejects file with invalid magic bytes', async () => {
-				const magic = new TextEncoder().encode('XXXX');
-				const version = new Uint8Array([0x01]);
-				const nonce = new Uint8Array(12);
-				const payload = new Uint8Array(20);
-				const tag = new Uint8Array(16);
-				const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
-				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
-					method: 'POST',
-					headers: { Authorization: `Bearer ${testToken}` },
-					body: fileData,
-				});
-
-				const ctx = createExecutionContext();
-				const response = await worker.fetch(request, env, ctx);
-				await waitOnExecutionContext(ctx);
-
-				expect(response.status).toBe(400);
-				const data = await response.json();
-				expect(data.error).toContain('Invalid file format: invalid magic bytes');
-			});
-
-			it('rejects file with invalid version', async () => {
-				const magic = new TextEncoder().encode('SECF');
-				const version = new Uint8Array([0x99]); // Invalid version
-				const nonce = new Uint8Array(12);
-				const payload = new Uint8Array(20);
-				const tag = new Uint8Array(16);
-				const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
-				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
-					method: 'POST',
-					headers: { Authorization: `Bearer ${testToken}` },
-					body: fileData,
-				});
-
-				const ctx = createExecutionContext();
-				const response = await worker.fetch(request, env, ctx);
-				await waitOnExecutionContext(ctx);
-
-				expect(response.status).toBe(400);
-				const data = await response.json();
-				expect(data.error).toContain('Invalid file format: unsupported version');
-			});
-
-			it('rejects file that is too small', async () => {
-				const fileData = new Uint8Array(10); // Less than 33 bytes minimum
-
-				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
-					method: 'POST',
-					headers: { Authorization: `Bearer ${testToken}` },
-					body: fileData,
-				});
-
-				const ctx = createExecutionContext();
-				const response = await worker.fetch(request, env, ctx);
-				await waitOnExecutionContext(ctx);
-
-				expect(response.status).toBe(400);
-				const data = await response.json();
-				expect(data.error).toContain('Invalid file format: file too small');
-			});
+			// Note: File format validation tests removed - validation now happens during upload, not file creation
 
 			it('creates multiple files for same user', async () => {
 				const createFile = async () => {
-					const magic = new TextEncoder().encode('SECF');
-					const version = new Uint8Array([0x01]);
-					const nonce = new Uint8Array(12);
-					crypto.getRandomValues(nonce);
-					const payload = new Uint8Array(20);
-					crypto.getRandomValues(payload);
-					const tag = new Uint8Array(16);
-					crypto.getRandomValues(tag);
-					const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
 					const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
 						method: 'POST',
 						headers: { Authorization: `Bearer ${testToken}` },
-						body: fileData,
 					});
 
 					const ctx = createExecutionContext();
@@ -981,17 +861,9 @@ describe('CryptDrive Worker', () => {
 			});
 
 			it('stores file with correct owner_hash', async () => {
-				const magic = new TextEncoder().encode('SECF');
-				const version = new Uint8Array([0x01]);
-				const nonce = new Uint8Array(12);
-				const payload = new Uint8Array(20);
-				const tag = new Uint8Array(16);
-				const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
 				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
 					method: 'POST',
 					headers: { Authorization: `Bearer ${testToken}` },
-					body: fileData,
 				});
 
 				const ctx = createExecutionContext();
@@ -999,7 +871,7 @@ describe('CryptDrive Worker', () => {
 				await waitOnExecutionContext(ctx);
 
 				const data = await response.json();
-				const expectedOwnerHash = await computeOwnerHashForTest(testPublicKey, env);
+				const expectedOwnerHash = await computeOwnerHashForTest(testUserId, env);
 
 				const result = await env.DB.prepare('SELECT owner_hash FROM files WHERE file_id = ?').bind(data.file_id).first();
 
@@ -1009,325 +881,7 @@ describe('CryptDrive Worker', () => {
 	});
 });
 
-describe('PUT /file/:file_id - Update file', () => {
-	let testUserId;
-	let testPublicKey;
-	let testToken;
-	let testFileId;
-	const testUserName = 'updatefileuser';
-	const salt = 'updatesalt';
-
-	beforeEach(async () => {
-		// Clean up database before each test
-		try {
-			await env.DB.prepare('DELETE FROM users').run();
-			await env.DB.prepare('DELETE FROM files').run();
-		} catch {
-			// Tables might not exist yet, that's ok
-		}
-
-		// Create a test user
-		testPublicKey = btoa('h'.repeat(32));
-
-		const createUserRequest = new Request(`http://example.com/${v1ApiPrefix}/user`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				public_key: testPublicKey,
-				username: testUserName,
-				salt: salt,
-				keychain_id: crypto.randomUUID(),
-			}),
-		});
-
-		let ctx = createExecutionContext();
-		const createUserResponse = await worker.fetch(createUserRequest, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		const userData = await createUserResponse.json();
-		testUserId = userData.user_id;
-
-		// Create an authentication token
-		const jwtSecret = env.JWT_SECRET || 'default-jwt-secret-change-in-production';
-		const now = Math.floor(Date.now() / 1000);
-		const payload = {
-			sub: testUserId,
-			iat: now,
-			exp: now + 3600,
-		};
-
-		const header = { alg: 'HS256', typ: 'JWT' };
-		const encodedHeader = btoa(JSON.stringify(header)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-		const encodedPayload = btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-		const data = `${encodedHeader}.${encodedPayload}`;
-
-		const encoder = new TextEncoder();
-		const key = await crypto.subtle.importKey('raw', encoder.encode(jwtSecret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-
-		const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
-		const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signature)))
-			.replace(/\+/g, '-')
-			.replace(/\//g, '_')
-			.replace(/=/g, '');
-		testToken = `${data}.${encodedSignature}`;
-
-		// Create a test file
-		const magic = new TextEncoder().encode('SECF');
-		const version = new Uint8Array([0x01]);
-		const nonce = new Uint8Array(12);
-		crypto.getRandomValues(nonce);
-		const payload2 = new Uint8Array(20);
-		const tag = new Uint8Array(16);
-		const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload2, ...tag]);
-
-		const createFileRequest = new Request(`http://example.com/${v1ApiPrefix}/file`, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${testToken}` },
-			body: fileData,
-		});
-
-		ctx = createExecutionContext();
-		const createFileResponse = await worker.fetch(createFileRequest, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		const fileResult = await createFileResponse.json();
-		testFileId = fileResult.file_id;
-	});
-
-	it('successfully updates a file with valid data', async () => {
-		// Create new file data
-		const magic = new TextEncoder().encode('SECF');
-		const version = new Uint8Array([0x01]);
-		const nonce = new Uint8Array(12);
-		crypto.getRandomValues(nonce);
-		const payload = new Uint8Array(30); // Different size
-		crypto.getRandomValues(payload);
-		const tag = new Uint8Array(16);
-		crypto.getRandomValues(tag);
-		const newFileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
-		const request = new Request(`http://example.com/${v1ApiPrefix}/file/${testFileId}`, {
-			method: 'PUT',
-			headers: { Authorization: `Bearer ${testToken}` },
-			body: newFileData,
-		});
-
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		expect(response.status).toBe(200);
-		const data = await response.json();
-		expect(data.success).toBe(true);
-		expect(data.updated_at).toBeDefined();
-
-		// Verify file was updated in R2
-		const storedFile = await env.BUCKET.get(testFileId);
-		expect(storedFile).not.toBeNull();
-		const storedData = await storedFile.arrayBuffer();
-		expect(new Uint8Array(storedData)).toEqual(newFileData);
-
-		// Verify metadata was updated in D1
-		const result = await env.DB.prepare('SELECT * FROM files WHERE file_id = ?').bind(testFileId).first();
-
-		expect(result.size).toBe(newFileData.byteLength);
-		expect(result.updated_at).toBe(data.updated_at);
-	});
-
-	it('rejects update without authentication', async () => {
-		const magic = new TextEncoder().encode('SECF');
-		const version = new Uint8Array([0x01]);
-		const nonce = new Uint8Array(12);
-		const payload = new Uint8Array(20);
-		const tag = new Uint8Array(16);
-		const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
-		const request = new Request(`http://example.com/${v1ApiPrefix}/file/${testFileId}`, {
-			method: 'PUT',
-			body: fileData,
-		});
-
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		expect(response.status).toBe(401);
-		const data = await response.json();
-		expect(data.error).toContain('Authorization header required');
-	});
-
-	it('rejects update of non-existent file', async () => {
-		const fakeFileId = crypto.randomUUID();
-		const magic = new TextEncoder().encode('SECF');
-		const version = new Uint8Array([0x01]);
-		const nonce = new Uint8Array(12);
-		const payload = new Uint8Array(20);
-		const tag = new Uint8Array(16);
-		const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
-		const request = new Request(`http://example.com/${v1ApiPrefix}/file/${fakeFileId}`, {
-			method: 'PUT',
-			headers: { Authorization: `Bearer ${testToken}` },
-			body: fileData,
-		});
-
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		expect(response.status).toBe(404);
-		const data = await response.json();
-		expect(data.error).toBe('File not found');
-	});
-
-	it('rejects update by non-owner', async () => {
-		// Create another user
-		const otherPublicKey = btoa('i'.repeat(32));
-		const createUserRequest = new Request(`http://example.com/${v1ApiPrefix}/user`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				public_key: otherPublicKey,
-				keychain_id: crypto.randomUUID(),
-				username: 'otheruser',
-				salt: 'othersalt',
-			}),
-		});
-
-		let ctx = createExecutionContext();
-		const createUserResponse = await worker.fetch(createUserRequest, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		const otherUserData = await createUserResponse.json();
-		const otherUserId = otherUserData.user_id;
-
-		// Create token for other user
-		const jwtSecret = env.JWT_SECRET || 'default-jwt-secret-change-in-production';
-		const now = Math.floor(Date.now() / 1000);
-		const payload = {
-			sub: otherUserId,
-			iat: now,
-			exp: now + 3600,
-		};
-
-		const header = { alg: 'HS256', typ: 'JWT' };
-		const encodedHeader = btoa(JSON.stringify(header)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-		const encodedPayload = btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-		const data = `${encodedHeader}.${encodedPayload}`;
-
-		const encoder = new TextEncoder();
-		const key = await crypto.subtle.importKey('raw', encoder.encode(jwtSecret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-
-		const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
-		const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signature)))
-			.replace(/\+/g, '-')
-			.replace(/\//g, '_')
-			.replace(/=/g, '');
-		const otherToken = `${data}.${encodedSignature}`;
-
-		// Try to update file with other user's token
-		const magic = new TextEncoder().encode('SECF');
-		const version = new Uint8Array([0x01]);
-		const nonce = new Uint8Array(12);
-		const payload2 = new Uint8Array(20);
-		const tag = new Uint8Array(16);
-		const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload2, ...tag]);
-
-		const request = new Request(`http://example.com/${v1ApiPrefix}/file/${testFileId}`, {
-			method: 'PUT',
-			headers: { Authorization: `Bearer ${otherToken}` },
-			body: fileData,
-		});
-
-		ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		expect(response.status).toBe(403);
-		const responseData = await response.json();
-		expect(responseData.error).toBe('Not file owner');
-	});
-
-	it('rejects empty file data', async () => {
-		const request = new Request(`http://example.com/${v1ApiPrefix}/file/${testFileId}`, {
-			method: 'PUT',
-			headers: { Authorization: `Bearer ${testToken}` },
-			body: new Uint8Array(0),
-		});
-
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		expect(response.status).toBe(400);
-		const data = await response.json();
-		expect(data.error).toBe('File data is required');
-	});
-
-	it('rejects file with invalid magic bytes', async () => {
-		const magic = new TextEncoder().encode('XXXX');
-		const version = new Uint8Array([0x01]);
-		const nonce = new Uint8Array(12);
-		const payload = new Uint8Array(20);
-		const tag = new Uint8Array(16);
-		const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
-		const request = new Request(`http://example.com/${v1ApiPrefix}/file/${testFileId}`, {
-			method: 'PUT',
-			headers: { Authorization: `Bearer ${testToken}` },
-			body: fileData,
-		});
-
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		expect(response.status).toBe(400);
-		const data = await response.json();
-		expect(data.error).toContain('Invalid file format: invalid magic bytes');
-	});
-
-	it('rejects file with invalid version', async () => {
-		const magic = new TextEncoder().encode('SECF');
-		const version = new Uint8Array([0x99]);
-		const nonce = new Uint8Array(12);
-		const payload = new Uint8Array(20);
-		const tag = new Uint8Array(16);
-		const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload, ...tag]);
-
-		const request = new Request(`http://example.com/${v1ApiPrefix}/file/${testFileId}`, {
-			method: 'PUT',
-			headers: { Authorization: `Bearer ${testToken}` },
-			body: fileData,
-		});
-
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		expect(response.status).toBe(400);
-		const data = await response.json();
-		expect(data.error).toContain('Invalid file format: unsupported version');
-	});
-
-	it('rejects file that is too small', async () => {
-		const fileData = new Uint8Array(10);
-
-		const request = new Request(`http://example.com/${v1ApiPrefix}/file/${testFileId}`, {
-			method: 'PUT',
-			headers: { Authorization: `Bearer ${testToken}` },
-			body: fileData,
-		});
-
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		await waitOnExecutionContext(ctx);
-
-		expect(response.status).toBe(400);
-		const data = await response.json();
-		expect(data.error).toContain('Invalid file format: file too small');
-	});
-});
+// PUT /file endpoint removed - file updates now use multipart upload flow
 
 describe('DELETE /file/:file_id - Delete file', () => {
 	let testUserId;
@@ -1391,26 +945,19 @@ describe('DELETE /file/:file_id - Delete file', () => {
 			.replace(/=/g, '');
 		testToken = `${data}.${encodedSignature}`;
 
-		// Create a test file
-		const magic = new TextEncoder().encode('SECF');
-		const version = new Uint8Array([0x01]);
-		const nonce = new Uint8Array(12);
-		crypto.getRandomValues(nonce);
-		const payload2 = new Uint8Array(20);
-		const tag = new Uint8Array(16);
-		const fileData = new Uint8Array([...magic, ...version, ...nonce, ...payload2, ...tag]);
-
+		// Create a test file (just metadata, no file data)
 		const createFileRequest = new Request(`http://example.com/${v1ApiPrefix}/file`, {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${testToken}` },
-			body: fileData,
 		});
 
 		ctx = createExecutionContext();
 		const createFileResponse = await worker.fetch(createFileRequest, env, ctx);
 		await waitOnExecutionContext(ctx);
-
-		expect(createFileResponse.status).toBe(201);
+		if (!createFileResponse.ok) {
+			const errorData = await createFileResponse.json();
+			throw new Error(`Failed to create test file: ${errorData.error}`);
+		}
 
 		const fileResult = await createFileResponse.json();
 		testFileId = fileResult.file_id;
@@ -1638,32 +1185,7 @@ async function createAndAuthenticateTestUser() {
 	};
 }
 
-// Helper function to create valid encrypted file data
-function createValidFileData(filename = 'test.txt', content = 'Hello, World!') {
-	// Create a valid SECF file format
-	const magic = new TextEncoder().encode('SECF');
-	const version = new Uint8Array([0x01]);
-	const nonce = new Uint8Array(12).fill(0x42); // Mock nonce
-
-	// Encode filename
-	const filenameBytes = new TextEncoder().encode(filename);
-	const filenameLengthBytes = new Uint8Array(2);
-	new DataView(filenameLengthBytes.buffer).setUint16(0, filenameBytes.length);
-
-	// Encode content
-	const contentBytes = new TextEncoder().encode(content);
-
-	// Create plaintext (this would be encrypted in real usage)
-	const plaintext = new Uint8Array([...filenameLengthBytes, ...filenameBytes, ...contentBytes]);
-
-	// Mock auth tag (in real usage, this comes from AES-GCM)
-	const authTag = new Uint8Array(16).fill(0x99);
-
-	// Combine all parts
-	const fileData = new Uint8Array([...magic, ...version, ...nonce, ...plaintext, ...authTag]);
-
-	return fileData;
-}
+// Helper function removed - file data validation now happens during multipart upload, not file creation
 
 describe('Rate Limiting', () => {
 	beforeEach(async () => {
@@ -1959,18 +1481,13 @@ describe('Rate Limiting', () => {
 		it('allows 20 write requests per minute', async () => {
 			const headers = {
 				Authorization: `Bearer ${testToken}`,
-				'Content-Type': 'application/octet-stream',
 			};
-
-			// Create a valid encrypted file
-			const fileData = createValidFileData();
 
 			// Make 10 write requests (reduced for test performance)
 			for (let i = 0; i < 10; i++) {
 				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
 					method: 'POST',
 					headers,
-					body: fileData,
 				});
 				const response = await worker.fetch(request, env, createExecutionContext());
 				expect(response.status).toBe(201);
@@ -1980,17 +1497,13 @@ describe('Rate Limiting', () => {
 		it('blocks 21st write request', async () => {
 			const headers = {
 				Authorization: `Bearer ${testToken}`,
-				'Content-Type': 'application/octet-stream',
 			};
-
-			const fileData = createValidFileData();
 
 			// Make 20 write requests
 			for (let i = 0; i < 20; i++) {
 				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
 					method: 'POST',
 					headers,
-					body: fileData,
 				});
 				await worker.fetch(request, env, createExecutionContext());
 			}
@@ -1999,7 +1512,6 @@ describe('Rate Limiting', () => {
 			const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
 				method: 'POST',
 				headers,
-				body: fileData,
 			});
 			const response = await worker.fetch(request, env, createExecutionContext());
 			expect(response.status).toBe(429);
@@ -2023,15 +1535,10 @@ describe('Rate Limiting', () => {
 			}
 
 			// Make some write requests - should not be affected by read count
-			const fileData = createValidFileData();
 			for (let i = 0; i < 10; i++) {
 				const request = new Request(`http://example.com/${v1ApiPrefix}/file`, {
 					method: 'POST',
-					headers: {
-						...headers,
-						'Content-Type': 'application/octet-stream',
-					},
-					body: fileData,
+					headers,
 				});
 				const response = await worker.fetch(request, env, createExecutionContext());
 				expect(response.status).toBe(201);

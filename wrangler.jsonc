@@ -20,7 +20,8 @@
 		{
 			"binding": "BUCKET",
 			"bucket_name": "cryptdrive",
-			"preview_bucket_name": "cryptdrive-preview",
+			"preview_bucket_name": "cryptdrive-test",
+			"remote": true,
 		},
 	],
 	"triggers": {

@@ -24,7 +24,7 @@ export async function initializeDatabase(db) {
 		CREATE TABLE IF NOT EXISTS files (
 			file_id TEXT PRIMARY KEY,
 			owner_hash TEXT NOT NULL,
-			size INTEGER NOT NULL,
+			size INTEGER,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)

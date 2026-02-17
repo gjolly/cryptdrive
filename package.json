@@ -35,6 +35,8 @@
 	},
 	"dependencies": {
 		"@noble/ed25519": "^2.0.0",
-		"argon2-browser": "^1.18.0"
+		"argon2-browser": "^1.18.0",
+		"aws4fetch": "^1.0.20",
+		"fast-xml-parser": "^5.3.6"
 	}
 }
