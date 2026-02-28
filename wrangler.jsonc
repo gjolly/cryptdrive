@@ -29,6 +29,17 @@
 	},
 	"vars": {
 		"CORS_ORIGIN": "https://cryptdrive.gauthier.workers.dev",
+		"FILE_BLOCK_SIZE": "5242880", // 5 MB (R2 minimum multipart size)
+		"FILE_MAX_SIZE": "1073741824", // 1 GB
+		"R2_URL": "https://a960ff602ad2d1308406ce5028bc96d4.r2.cloudflarestorage.com",
+		"R2_BUCKET_NAME": "cryptdrive",
+		/*
+		 * The following secrets should be set
+		 * SERVER_PEPPER: A random string used to enhance password hashing security.
+		 * JWT_SECRET: A random string used to sign and verify JSON Web Tokens (JWTs).
+		 * R2_ACCESS_KEY_ID: The access key ID for your R2 bucket.
+		 * R2_SECRET_ACCESS_KEY: The secret access key for your R2 bucket.
+		 */
 	},
 	"assets": {
 		"directory": "./dist/",

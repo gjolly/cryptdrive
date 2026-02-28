@@ -575,9 +575,17 @@ async function loadFiles() {
 				const shareBtn = document.createElement('button');
 				shareBtn.textContent = 'Share';
 				shareBtn.onclick = () => generateShareLink(file.file_id);
+
 				const downloadBtn = document.createElement('button');
 				downloadBtn.textContent = 'Download';
 				downloadBtn.onclick = () => downloadFile(file.file_id);
+
+				const deleteBtn = document.createElement('button');
+				deleteBtn.textContent = 'Delete';
+				deleteBtn.className = 'danger';
+				deleteBtn.onclick = () => deleteFile(file.file_id);
+				actionsDiv.appendChild(deleteBtn);
+
 				actionsDiv.appendChild(shareBtn);
 				actionsDiv.appendChild(downloadBtn);
 
@@ -704,6 +712,9 @@ async function uploadFile(file, fileKey, fileId = null, filename = null) {
 	}
 	parts.push({ part_number: 1, etag: part1Resp.headers.get('ETag') });
 
+	// Update progress after first chunk
+	updateUploadProgress(1, totalChunks);
+
 	// 6) Upload remaining encrypted chunks (chunkIndex 1 to totalChunks-1)
 	for (let chunkIndex = 1; chunkIndex < totalChunks; chunkIndex++) {
 		const partNumber = chunkIndex + 1;
@@ -742,6 +753,9 @@ async function uploadFile(file, fileKey, fileId = null, filename = null) {
 			throw new Error(`Failed to upload part ${partNumber}`);
 		}
 		parts.push({ part_number: partNumber, etag: uploadResp.headers.get('ETag') });
+
+		// Update progress after each chunk
+		updateUploadProgress(chunkIndex + 1, totalChunks);
 	}
 
 	// 7) Complete multipart upload
@@ -758,11 +772,58 @@ async function uploadFile(file, fileKey, fileId = null, filename = null) {
 	return file_id;
 }
 
+function updateUploadProgress(current, total) {
+	const progressContainer = document.getElementById('uploadProgressContainer');
+	const progressFill = document.getElementById('uploadProgressFill');
+
+	if (!progressContainer || !progressFill) return;
+
+	progressContainer.classList.remove('hidden');
+	const percentage = Math.round((current / total) * 100);
+	progressFill.style.width = `${percentage}%`;
+	progressFill.textContent = `${percentage}%`;
+}
+
+function hideUploadProgress() {
+	const progressContainer = document.getElementById('uploadProgressContainer');
+	const progressFill = document.getElementById('uploadProgressFill');
+
+	if (!progressContainer || !progressFill) return;
+
+	progressContainer.classList.add('hidden');
+	progressFill.style.width = '0%';
+	progressFill.textContent = '0%';
+}
+
+async function deleteFile(fileId) {
+	if (!confirm('Are you sure you want to delete this file? This action cannot be undone.')) {
+		return;
+	}
+
+	try {
+		const response = await apiCall(`/file/${fileId}`, { method: 'DELETE' });
+		if (!response.ok) {
+			throw new Error('Failed to delete file');
+		}
+
+		// Remove from keychain
+		delete session.keychain.files[fileId];
+
+		showSuccess('filesSuccess', 'File deleted successfully');
+		await loadFiles();
+	} catch (error) {
+		showError('filesError', error.message);
+	}
+}
+
 async function handleUpload(event) {
 	event.preventDefault();
 	const btn = document.getElementById('uploadBtn');
 	btn.disabled = true;
 	btn.textContent = 'Uploading...';
+
+	// Reset and show progress bar
+	hideUploadProgress();
 
 	try {
 		const fileInput = document.getElementById('fileInput');
@@ -799,6 +860,8 @@ async function handleUpload(event) {
 	} catch (error) {
 		showError('filesError', error.message);
 	} finally {
+		// Hide progress bar and reset button
+		hideUploadProgress();
 		btn.disabled = false;
 		btn.textContent = 'Upload';
 	}

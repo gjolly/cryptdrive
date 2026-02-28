@@ -21,6 +21,10 @@
 			.file-item:hover {
 				background-color: var(--accent-bg);
 			}
+			.file-item > div:last-child {
+				display: flex;
+				gap: 0.5rem;
+			}
 			.error {
 				color: var(--red);
 				padding: 1rem;
@@ -38,6 +42,29 @@
 			.loading {
 				text-align: center;
 				padding: 2rem;
+			}
+			.progress-container {
+				width: 100%;
+				margin: 1rem 0;
+			}
+			.progress-bar {
+				width: 100%;
+				height: 24px;
+				background-color: var(--accent-bg);
+				border-radius: 4px;
+				overflow: hidden;
+				border: 1px solid var(--border);
+			}
+			.progress-fill {
+				height: 100%;
+				background-color: var(--accent);
+				transition: width 0.3s ease;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				color: white;
+				font-weight: bold;
+				font-size: 0.875rem;
 			}
 		</style>
 	</head>
@@ -106,6 +133,11 @@
 						<input type="file" id="fileInput" required />
 						<button type="submit" id="uploadBtn">Upload</button>
 					</form>
+					<div id="uploadProgressContainer" class="progress-container hidden">
+						<div class="progress-bar">
+							<div id="uploadProgressFill" class="progress-fill" style="width: 0%">0%</div>
+						</div>
+					</div>
 				</details>
 
 				<!-- Files List -->
