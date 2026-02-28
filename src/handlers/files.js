@@ -104,22 +104,38 @@ export async function handleGetFile(request, env, corsHeaders, fileId) {
 	// Initialize database
 	await initializeDatabase(env.DB);
 
-	const checkAnonymousDownloadRateLimitResult = await checkAnonymousDownloadRateLimit(request, env);
-	if (!checkAnonymousDownloadRateLimitResult.allowed) {
-		return jsonResponse(
-			{
-				error: checkAnonymousDownloadRateLimitResult.error,
-			},
-			checkAnonymousDownloadRateLimitResult.status,
-			corsHeaders
-		);
-	}
-
 	// Check if file exists
 	const file = await env.DB.prepare('SELECT * FROM files WHERE file_id = ?').bind(fileId).first();
 
 	if (!file) {
 		return jsonResponse({ error: 'File not found' }, 404, corsHeaders);
+	}
+
+	if (!file.public) {
+		// Authenticate request
+		const { user_id, error, status } = await authenticateRequest(request, env);
+		if (error) {
+			return jsonResponse({ error }, status, corsHeaders);
+		}
+
+		// Compute owner hash for authenticated user
+		const ownerHash = await computeOwnerHash(user_id, env);
+
+		if (file.owner_hash !== ownerHash) {
+			return jsonResponse({ error: 'File not found' }, 404, corsHeaders);
+		}
+	} else {
+		// Check rate limit for anonymous downloads
+		const checkAnonymousDownloadRateLimitResult = await checkAnonymousDownloadRateLimit(request, env);
+		if (!checkAnonymousDownloadRateLimitResult.allowed) {
+			return jsonResponse(
+				{
+					error: checkAnonymousDownloadRateLimitResult.error,
+				},
+				checkAnonymousDownloadRateLimitResult.status,
+				corsHeaders
+			);
+		}
 	}
 
 	// Get file from R2
@@ -131,6 +147,52 @@ export async function handleGetFile(request, env, corsHeaders, fileId) {
 		console.error('R2 get error:', err);
 		return jsonResponse({ error: 'Failed to retrieve file' }, 500, corsHeaders);
 	}
+}
+
+/*
+ * Handle POST /file/:file_id/publish - Publish file (make it public)
+ * This doesn't mean the file content is readable by everyone,
+ * it's still encrypted and can only be decrypted by someone with the key.
+ */
+export async function handlePublishFile(request, env, corsHeaders, fileId) {
+	// Initialize database
+	await initializeDatabase(env.DB);
+
+	// Authenticate request
+	const { user_id, error, status } = await authenticateRequest(request, env);
+	if (error) {
+		return jsonResponse({ error }, status, corsHeaders);
+	}
+
+	// Check rate limit (write operation)
+	const rateLimitCheck = await checkFileOperationRateLimit(user_id, env, true);
+	if (!rateLimitCheck.allowed) {
+		return jsonResponse({ error: rateLimitCheck.error }, rateLimitCheck.status, corsHeaders);
+	}
+
+	// Compute owner hash for authenticated user
+	const ownerHash = await computeOwnerHash(user_id, env);
+
+	// Check if file exists and verify ownership
+	const file = await env.DB.prepare('SELECT owner_hash FROM files WHERE file_id = ?').bind(fileId).first();
+
+	if (!file) {
+		return jsonResponse({ error: 'File not found' }, 404, corsHeaders);
+	}
+
+	if (file.owner_hash !== ownerHash) {
+		return jsonResponse({ error: 'Not file owner' }, 403, corsHeaders);
+	}
+
+	// Update file to be public
+	try {
+		await env.DB.prepare('UPDATE files SET public = 1, updated_at = ? WHERE file_id = ?').bind(new Date().toISOString(), fileId).run();
+	} catch (err) {
+		console.error('Database update error:', err);
+		return jsonResponse({ error: 'Failed to publish file' }, 500, corsHeaders);
+	}
+
+	return jsonResponse({ success: true }, 200, corsHeaders);
 }
 
 /**

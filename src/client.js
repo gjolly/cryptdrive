@@ -855,7 +855,16 @@ function formatBytes(bytes) {
 	return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
 
-function generateShareLink(fileId) {
+async function generateShareLink(fileId) {
+	// First we need to call the API to make the file publically accessible
+	// (without authentication) so that the download URL can be accessed by
+	// anyone with the link
+	const response = await apiCall(`/file/${fileId}/publish`, { method: 'POST' });
+	if (!response.ok) {
+		showError('filesError', 'Failed to publish file for sharing');
+		return;
+	}
+
 	try {
 		const fileInfo = session.keychain.files[fileId];
 		if (!fileInfo) {

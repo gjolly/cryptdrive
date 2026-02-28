@@ -4,7 +4,7 @@
  */
 import { handleCreateUser } from './handlers/user.js';
 import { handleAuthToken } from './handlers/auth.js';
-import { handleListFiles, handleCreateFile, handleDeleteFile } from './handlers/files.js';
+import { handleListFiles, handleCreateFile, handleDeleteFile, handlePublishFile } from './handlers/files.js';
 import {
 	handleCreateMultipartUpload,
 	handleGetMultipartUploadUrl,
@@ -77,6 +77,13 @@ export default {
 			if (fileMatch && method === 'DELETE') {
 				const fileId = fileMatch[1];
 				return await handleDeleteFile(request, env, fileId, corsHeaders);
+			}
+
+			// Route: POST /file/:file_id/publish - Publish file
+			const filePublishMatch = path.match(new RegExp(`^${apiBase}/file/([a-f0-9-]+)/publish$`));
+			if (filePublishMatch && method === 'POST') {
+				const fileId = filePublishMatch[1];
+				return await handlePublishFile(request, env, corsHeaders, fileId);
 			}
 
 			// Route: GET /file/:file_id/upload - Start mulitpart upload and get upload ID
