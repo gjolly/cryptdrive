@@ -8,3 +8,4 @@
 - Don't use "CREATE TABLE IF NOT EXISTS" on every request, create the table during a setup phase or check for its existence in a more efficient way
 - User better rate limiting, probably involving CAPTCHAs for unauthenticated endpoints
 - Add tests for positive /auth/token and replay attacks
+- Fix test slowness due to reliance on R2.

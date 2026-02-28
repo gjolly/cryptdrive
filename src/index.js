@@ -13,7 +13,7 @@ import {
 } from './handlers/multipart.js';
 import { handleScheduled } from './schedule.js';
 import { jsonResponse } from './utils/response.js';
-import { getDownloadUrl } from './utils/multipart.js';
+import { getDownloadUrl, getClient } from './utils/multipart.js';
 
 export default {
 	async fetch(request, env) {
@@ -66,7 +66,9 @@ export default {
 			const fileMatch = path.match(new RegExp(`^${apiBase}/file/([a-f0-9-]+)$`));
 			if (fileMatch && method === 'GET') {
 				const fileId = fileMatch[1];
-				const downloadUrl = await getDownloadUrl(env.AWS_CLIENT, env.R2_URL, fileId, 300);
+				const { client, r2Url } = getClient(env);
+
+				const downloadUrl = await getDownloadUrl(client, r2Url, fileId, 300);
 
 				return jsonResponse({ downloadUrl }, 200, corsHeaders);
 			}

@@ -1,0 +1,14 @@
+{
+	"rules": [
+		{
+			"id": "cryptdrive-frontend",
+			"Allowed": {
+				"origin": "https://cryptdrive.gauthier.workers.dev",
+				"methods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+				"headers": ["*"]
+			},
+			"exposeHeaders": ["ETag", "Content-Length"],
+			"maxAgeSeconds": 3600
+		}
+	]
+}

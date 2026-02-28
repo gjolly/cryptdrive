@@ -1,0 +1,14 @@
+{
+	"rules": [
+		{
+			"id": "cryptdrive-test-frontend",
+			"allowed": {
+				"origins": ["http://localhost:8787"],
+				"methods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+				"headers": ["*"]
+			},
+			"exposeHeaders": ["ETag", "Content-Length"],
+			"maxAgeSeconds": 3600
+		}
+	]
+}

@@ -331,13 +331,8 @@ Authorization: Bearer <JWT>
 **Request:**
 
 ```http
-POST /files
+POST /file
 Authorization: Bearer <JWT>
-Content-Type: application/json
-
-{
-    "total_size": 104857600
-}
 ```
 
 **Response:**
@@ -371,7 +366,7 @@ Content-Type: application/json
 **Request:**
 
 ```http
-GET /files/{file_id}/upload
+GET /file/{file_id}/upload
 Authorization: Bearer <JWT>
 ```
 

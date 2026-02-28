@@ -15,6 +15,8 @@ nobleEd25519.etc.sha512Async = async (...messages) => {
 
 // Configuration
 const API_BASE = window.location.origin + '/api/v1';
+// Plaintext bytes per encrypted chunk when uploading files (must be <= server FILE_BLOCK_SIZE - GCM_TAG_LENGTH)
+const FILE_CHUNK_PLAINTEXT_SIZE = 5 * 1024 * 1024 - 16; // 5 MiB block size (minimum R2) minus 16-byte GCM tag
 
 // Load session from sessionStorage if available
 function loadSession() {
@@ -159,64 +161,6 @@ function base64ToArray(base64) {
 	);
 }
 
-async function encryptFile(filename, content, fileKey) {
-	const filenameBytes = new TextEncoder().encode(filename);
-	const filenameLengthBytes = new Uint8Array(2);
-	new DataView(filenameLengthBytes.buffer).setUint16(0, filenameBytes.length);
-
-	const plaintext = new Uint8Array([...filenameLengthBytes, ...filenameBytes, ...new Uint8Array(content)]);
-
-	const nonce = crypto.getRandomValues(new Uint8Array(12));
-	const key = await crypto.subtle.importKey('raw', fileKey, { name: 'AES-GCM' }, false, ['encrypt']);
-	const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plaintext);
-
-	const magic = new TextEncoder().encode('SECF');
-	const version = new Uint8Array([0x01]);
-
-	return new Uint8Array([...magic, ...version, ...nonce, ...new Uint8Array(encrypted)]);
-}
-
-async function decryptFile(encryptedFile, fileKey) {
-	const magic = encryptedFile.slice(0, 4);
-	const expectedMagic = new TextEncoder().encode('SECF');
-	if (!arraysEqual(magic, expectedMagic)) {
-		throw new Error('Invalid file format');
-	}
-
-	const nonce = encryptedFile.slice(5, 17);
-	const ciphertext = encryptedFile.slice(17);
-
-	const key = await crypto.subtle.importKey('raw', fileKey, { name: 'AES-GCM' }, false, ['decrypt']);
-	const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, ciphertext);
-	const plaintextArray = new Uint8Array(plaintext);
-
-	const filenameLength = new DataView(plaintextArray.buffer).getUint16(0);
-	const filename = new TextDecoder().decode(plaintextArray.slice(2, 2 + filenameLength));
-	const content = plaintextArray.slice(2 + filenameLength);
-
-	return { filename, content };
-}
-
-function arraysEqual(a, b) {
-	if (a.length !== b.length) return false;
-	for (let i = 0; i < a.length; i++) {
-		if (a[i] !== b[i]) return false;
-	}
-	return true;
-}
-
-async function encryptKeychain(keychain, keychainKey) {
-	const json = JSON.stringify(keychain);
-	const fakeFilename = 'keychain.json';
-	return await encryptFile(fakeFilename, new TextEncoder().encode(json), keychainKey);
-}
-
-async function decryptKeychain(encryptedData, keychainKey) {
-	const { content } = await decryptFile(encryptedData, keychainKey);
-	const json = new TextDecoder().decode(content);
-	return JSON.parse(json);
-}
-
 // ===== API Functions =====
 
 async function apiCall(endpoint, options = {}) {
@@ -283,12 +227,10 @@ async function handleRegister(event) {
 		// Auto-login first to get token
 		await performLogin(username, passphrase);
 
-		// Now upload keychain with the token
-		const encryptedKeychain = await encryptKeychain(session.keychain, session.keychainKey);
-		await apiCall(`/file/${session.keychainId}`, {
-			method: 'PUT',
-			body: encryptedKeychain,
-		});
+		// Now upload keychain with the token (using v2 format)
+		const keychainJson = JSON.stringify(session.keychain);
+		const keychainBlob = new Blob([keychainJson]);
+		await uploadFile(keychainBlob, session.keychainKey, session.keychainId, 'keychain.json');
 
 		// Save session to sessionStorage
 		saveSession();
@@ -392,6 +334,182 @@ function logout() {
 
 // ===== File Management =====
 
+/**
+ * Download and decrypt a file stored in v2 format (multipart with chunks)
+ * Streams the download and decrypts incrementally to handle large files efficiently
+ */
+async function downloadAndDecryptFile(fileId, fileKey, triggerDownload = false) {
+	const METADATA_SIZE = 512; // Fixed plaintext metadata size
+	const ENCRYPTED_METADATA_SIZE = METADATA_SIZE + 16; // +16 for GCM tag
+	const BASE_NONCE_SIZE = 12;
+	const HEADER_SIZE = BASE_NONCE_SIZE + ENCRYPTED_METADATA_SIZE; // 12 + 528 = 540 bytes
+
+	// Get download URL for the complete file (all parts concatenated by R2)
+	const urlResp = await apiCall(`/file/${fileId}`);
+	if (!urlResp.ok) {
+		throw new Error('Failed to get download URL');
+	}
+	const { downloadUrl } = await urlResp.json();
+
+	// Start streaming download
+	const fileResp = await fetch(downloadUrl);
+	if (!fileResp.ok) {
+		throw new Error('Failed to download file');
+	}
+
+	const reader = fileResp.body.getReader();
+	let buffer = new Uint8Array(0);
+
+	// Helper to append data to buffer
+	const appendToBuffer = (newData) => {
+		const combined = new Uint8Array(buffer.length + newData.length);
+		combined.set(buffer);
+		combined.set(newData, buffer.length);
+		buffer = combined;
+	};
+
+	// Read enough data to get header: baseNonce (12 bytes) + encrypted metadata (528 bytes)
+	while (buffer.length < HEADER_SIZE) {
+		const { done, value } = await reader.read();
+		if (done) {
+			throw new Error('Stream ended before header could be read');
+		}
+		appendToBuffer(value);
+	}
+
+	// Extract baseNonce (unencrypted)
+	const baseNonce = buffer.slice(0, BASE_NONCE_SIZE);
+
+	// Extract and decrypt metadata
+	const encryptedMeta = buffer.slice(BASE_NONCE_SIZE, HEADER_SIZE);
+	const aesKey = await crypto.subtle.importKey('raw', fileKey, { name: 'AES-GCM' }, false, ['decrypt']);
+
+	// Decrypt metadata using baseNonce + chunkIndex=-1
+	const metaNonce = new Uint8Array(12);
+	metaNonce.set(baseNonce);
+	new DataView(metaNonce.buffer).setInt32(8, -1, false);
+
+	const decryptedMetaBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: metaNonce }, aesKey, encryptedMeta);
+	const decryptedMeta = new Uint8Array(decryptedMetaBuffer);
+
+	// Parse metadata JSON (trim null bytes used for padding)
+	const metadataText = new TextDecoder().decode(decryptedMeta).replace(/\0+$/, '');
+	const metadata = JSON.parse(metadataText);
+
+	// Validate format
+	if (metadata.magic !== 'SECF' || metadata.version !== 2) {
+		throw new Error('Invalid or unsupported file format');
+	}
+
+	const { totalChunks, originalSize, chunkSize, filename } = metadata;
+
+	// Remove header from buffer
+	buffer = buffer.slice(HEADER_SIZE);
+
+	// For browser downloads, we'll decrypt to a file handle if available, or accumulate in memory
+	let fileHandle = null;
+	let writable = null;
+	const decryptedChunks = []; // Fallback for browsers without File System Access API
+
+	// Try to use File System Access API for direct-to-disk writes (if triggerDownload is true)
+	if (triggerDownload && 'showSaveFilePicker' in window) {
+		try {
+			fileHandle = await window.showSaveFilePicker({
+				suggestedName: filename,
+				types: [
+					{
+						description: 'Downloaded file',
+						accept: { '*/*': [] },
+					},
+				],
+			});
+			writable = await fileHandle.createWritable();
+		} catch (e) {
+			// User cancelled or API not available, fall back to memory accumulation
+			console.log('File System Access API not available or cancelled, using fallback: ', e);
+		}
+	}
+
+	// Process encrypted chunks incrementally
+	let chunkIndex = 0;
+	let offset = 0;
+	const HEADER_OVERHEAD = 12 + 528;
+	const FIRST_CHUNK_SIZE = chunkSize - HEADER_OVERHEAD; // First chunk is smaller
+
+	while (chunkIndex < totalChunks) {
+		const isLastChunk = chunkIndex === totalChunks - 1;
+		let plaintextSize;
+		if (chunkIndex === 0) {
+			// First chunk is smaller to account for header
+			plaintextSize = Math.min(FIRST_CHUNK_SIZE, originalSize);
+		} else if (isLastChunk) {
+			// Last chunk is whatever remains
+			plaintextSize = originalSize - FIRST_CHUNK_SIZE - (chunkIndex - 1) * chunkSize;
+		} else {
+			// Middle chunks are full size
+			plaintextSize = chunkSize;
+		}
+		const encryptedSize = plaintextSize + 16; // +16 for GCM tag
+
+		// Make sure we have enough data in buffer for this chunk
+		while (buffer.length < offset + encryptedSize) {
+			const { done, value } = await reader.read();
+			if (done) {
+				if (buffer.length < offset + encryptedSize) {
+					throw new Error('Stream ended unexpectedly');
+				}
+				break;
+			}
+			appendToBuffer(value);
+		}
+
+		// Extract and decrypt chunk
+		const encryptedChunk = buffer.slice(offset, offset + encryptedSize);
+
+		// Derive chunk nonce
+		const chunkNonce = new Uint8Array(12);
+		chunkNonce.set(baseNonce);
+		new DataView(chunkNonce.buffer).setUint32(8, chunkIndex, false);
+
+		// Decrypt chunk
+		const decryptedBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: chunkNonce }, aesKey, encryptedChunk);
+		const decryptedChunk = new Uint8Array(decryptedBuffer);
+
+		// Write to file or accumulate in memory
+		if (writable) {
+			await writable.write(decryptedChunk);
+		} else {
+			decryptedChunks.push(decryptedChunk);
+		}
+
+		offset += encryptedSize;
+		chunkIndex++;
+
+		// Free memory by removing processed encrypted data from buffer
+		if (offset > 10 * 1024 * 1024) {
+			// Keep at most 10MB in buffer
+			buffer = buffer.slice(offset);
+			offset = 0;
+		}
+	}
+
+	// Close writable stream if we used it
+	if (writable) {
+		await writable.close();
+		return { filename, content: null }; // Content already written to disk
+	}
+
+	// Fallback: combine chunks in memory
+	const combined = new Uint8Array(originalSize);
+	let combineOffset = 0;
+	for (const chunk of decryptedChunks) {
+		combined.set(chunk, combineOffset);
+		combineOffset += chunk.length;
+	}
+
+	return { filename, content: combined };
+}
+
 async function loadFiles() {
 	document.getElementById('filesLoading').classList.remove('hidden');
 	document.getElementById('filesList').innerHTML = '';
@@ -405,9 +523,9 @@ async function loadFiles() {
 		for (const file of data.files) {
 			// Try to decrypt as keychain
 			try {
-				const fileResp = await apiCall(`/file/${file.file_id}`);
-				const fileData = new Uint8Array(await fileResp.arrayBuffer());
-				const keychain = await decryptKeychain(fileData, session.keychainKey);
+				const { content } = await downloadAndDecryptFile(file.file_id, session.keychainKey, false);
+				const json = new TextDecoder().decode(content);
+				const keychain = JSON.parse(json);
 
 				if (keychain.version === 1 && keychain.files) {
 					session.keychain = keychain;
@@ -474,6 +592,176 @@ async function loadFiles() {
 	}
 }
 
+async function uploadFile(file, fileKey, fileId = null, filename = null) {
+	const baseNonce = crypto.getRandomValues(new Uint8Array(12));
+	const METADATA_SIZE = 512; // Fixed plaintext metadata size (before encryption)
+	const HEADER_OVERHEAD = 12 + 528; // baseNonce + encrypted metadata in Part 1
+	const FIRST_CHUNK_PLAINTEXT_SIZE = FILE_CHUNK_PLAINTEXT_SIZE - HEADER_OVERHEAD; // Smaller first chunk to keep Part 1 at exactly 5 MiB
+
+	// Calculate total chunks considering the smaller first chunk
+	const firstChunkSize = Math.min(FIRST_CHUNK_PLAINTEXT_SIZE, file.size);
+	const remainingSize = Math.max(0, file.size - firstChunkSize);
+	const remainingChunks = Math.ceil(remainingSize / FILE_CHUNK_PLAINTEXT_SIZE);
+	const totalChunks = 1 + remainingChunks;
+
+	// 1) Create or reuse file_id
+	let file_id = fileId;
+	if (!file_id) {
+		// Create new file metadata record on the server
+		const createResp = await apiCall('/file', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				total_size: file.size,
+				total_chunks: totalChunks, // Number of actual parts (metadata+chunk0 is part 1, then chunks 1..N-1)
+			}),
+		});
+		if (!createResp.ok) {
+			throw new Error('Failed to create file on server');
+		}
+		const result = await createResp.json();
+		file_id = result.file_id;
+	}
+
+	// 2) Initiate multipart upload to get upload_id
+	const startResp = await apiCall(`/file/${file_id}/upload`, {
+		method: 'GET',
+	});
+	if (!startResp.ok) {
+		throw new Error('Failed to initiate multipart upload');
+	}
+	const { upload_id } = await startResp.json();
+
+	const parts = [];
+	const encoder = new TextEncoder();
+	const aesKey = await crypto.subtle.importKey('raw', fileKey, { name: 'AES-GCM' }, false, ['encrypt']);
+
+	// Helper to abort multipart upload on failures
+	const abortUpload = async () => {
+		try {
+			await apiCall(`/file/${file_id}/upload/${upload_id}`, { method: 'DELETE' });
+		} catch (e) {
+			console.error('Failed to abort multipart upload:', e);
+		}
+	};
+
+	// 3) Prepare and encrypt metadata
+	const metadata = {
+		magic: 'SECF',
+		version: 2,
+		baseNonce: Array.from(baseNonce),
+		chunkSize: FILE_CHUNK_PLAINTEXT_SIZE,
+		filename: filename || file.name || 'file',
+		originalSize: file.size,
+		totalChunks,
+	};
+	const metadataJson = JSON.stringify(metadata);
+	const metadataBytes = encoder.encode(metadataJson);
+
+	// Pad metadata to fixed size (remaining bytes are zeros)
+	const metadataPadded = new Uint8Array(METADATA_SIZE);
+	metadataPadded.set(metadataBytes);
+
+	// Encrypt metadata with chunkIndex=-1 (special value for metadata)
+	const metaNonce = new Uint8Array(12);
+	metaNonce.set(baseNonce);
+	new DataView(metaNonce.buffer).setInt32(8, -1, false); // Use -1 for metadata
+
+	const encryptedMetaBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: metaNonce }, aesKey, metadataPadded);
+	const encryptedMeta = new Uint8Array(encryptedMetaBuffer);
+
+	// 4) Encrypt first chunk of file data (chunkIndex=0) - smaller to account for header overhead
+	const firstChunkBuffer = await file.slice(0, firstChunkSize).arrayBuffer();
+	const firstChunkData = new Uint8Array(firstChunkBuffer);
+
+	const firstChunkNonce = new Uint8Array(12);
+	firstChunkNonce.set(baseNonce);
+	new DataView(firstChunkNonce.buffer).setUint32(8, 0, false);
+
+	const encryptedFirstChunkBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: firstChunkNonce }, aesKey, firstChunkData);
+	const encryptedFirstChunk = new Uint8Array(encryptedFirstChunkBuffer);
+
+	// 5) Upload part 1: baseNonce + encrypted metadata + encrypted first chunk
+	const part1UrlResp = await apiCall(`/file/${file_id}/upload/${upload_id}/part/1`, {
+		method: 'GET',
+	});
+	if (!part1UrlResp.ok) {
+		await abortUpload();
+		throw new Error('Failed to get upload URL for part 1');
+	}
+	const { upload_url: part1Url } = await part1UrlResp.json();
+
+	// Concatenate: baseNonce (unencrypted) + encrypted metadata + encrypted first chunk
+	const part1Data = new Uint8Array(baseNonce.length + encryptedMeta.length + encryptedFirstChunk.length);
+	part1Data.set(baseNonce, 0);
+	part1Data.set(encryptedMeta, baseNonce.length);
+	part1Data.set(encryptedFirstChunk, baseNonce.length + encryptedMeta.length);
+
+	const part1Resp = await fetch(part1Url, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/octet-stream' },
+		body: part1Data,
+	});
+	if (!part1Resp.ok) {
+		await abortUpload();
+		throw new Error('Failed to upload part 1');
+	}
+	parts.push({ part_number: 1, etag: part1Resp.headers.get('ETag') });
+
+	// 6) Upload remaining encrypted chunks (chunkIndex 1 to totalChunks-1)
+	for (let chunkIndex = 1; chunkIndex < totalChunks; chunkIndex++) {
+		const partNumber = chunkIndex + 1;
+		const partUrlResp = await apiCall(`/file/${file_id}/upload/${upload_id}/part/${partNumber}`, {
+			method: 'GET',
+		});
+		if (!partUrlResp.ok) {
+			await abortUpload();
+			throw new Error(`Failed to get upload URL for part ${partNumber}`);
+		}
+		const { upload_url } = await partUrlResp.json();
+
+		// Start after the first (smaller) chunk
+		const start = firstChunkSize + (chunkIndex - 1) * FILE_CHUNK_PLAINTEXT_SIZE;
+		const end = Math.min(start + FILE_CHUNK_PLAINTEXT_SIZE, file.size);
+		const chunkBuffer = await file.slice(start, end).arrayBuffer();
+		const chunkData = new Uint8Array(chunkBuffer);
+
+		// Derive unique nonce for this chunk from baseNonce and chunkIndex
+		const chunkNonce = new Uint8Array(12);
+		chunkNonce.set(baseNonce);
+		new DataView(chunkNonce.buffer).setUint32(8, chunkIndex, false);
+
+		const encryptedChunkBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: chunkNonce }, aesKey, chunkData);
+		const encryptedChunk = new Uint8Array(encryptedChunkBuffer);
+
+		const uploadResp = await fetch(upload_url, {
+			method: 'PUT',
+			headers: {
+				'Content-Type': 'application/octet-stream',
+			},
+			body: encryptedChunk,
+		});
+		if (!uploadResp.ok) {
+			await abortUpload();
+			throw new Error(`Failed to upload part ${partNumber}`);
+		}
+		parts.push({ part_number: partNumber, etag: uploadResp.headers.get('ETag') });
+	}
+
+	// 7) Complete multipart upload
+	const completeResp = await apiCall(`/file/${file_id}/upload/${upload_id}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ parts }),
+	});
+	if (!completeResp.ok) {
+		await abortUpload();
+		throw new Error('Failed to complete multipart upload');
+	}
+
+	return file_id;
+}
+
 async function handleUpload(event) {
 	event.preventDefault();
 	const btn = document.getElementById('uploadBtn');
@@ -484,38 +772,30 @@ async function handleUpload(event) {
 		const fileInput = document.getElementById('fileInput');
 		const file = fileInput.files[0];
 
+		if (!file) {
+			throw new Error('Please select a file to upload.');
+		}
+
 		// Generate file key
 		const fileKey = crypto.getRandomValues(new Uint8Array(32));
 
-		// Read and encrypt file
-		const arrayBuffer = await file.arrayBuffer();
-		const encryptedFile = await encryptFile(file.name, arrayBuffer, fileKey);
-
 		// Upload file
-		const uploadResp = await apiCall('/file', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/octet-stream' },
-			body: encryptedFile,
-		});
+		const file_id = await uploadFile(file, fileKey);
 
-		const { file_id } = await uploadResp.json();
-
-		// Update keychain
+		// 6) Update keychain with new file entry (stores original size)
 		session.keychain.files[file_id] = {
 			key: Array.from(fileKey)
 				.map((b) => b.toString(16).padStart(2, '0'))
 				.join(''),
 			filename: file.name,
 			created: new Date().toISOString(),
-			size: encryptedFile.length,
+			size: file.size,
 		};
 
-		// Upload updated keychain
-		const encryptedKeychain = await encryptKeychain(session.keychain, session.keychainKey);
-		await apiCall(`/file/${session.keychainId}`, {
-			method: 'PUT',
-			body: encryptedKeychain,
-		});
+		// Upload updated keychain (as raw JSON using v2 format)
+		const keychainJson = JSON.stringify(session.keychain);
+		const keychainBlob = new Blob([keychainJson]);
+		await uploadFile(keychainBlob, session.keychainKey, session.keychainId, 'keychain.json');
 
 		showSuccess('filesSuccess', `File "${file.name}" uploaded successfully!`);
 		fileInput.value = '';
@@ -543,25 +823,16 @@ async function downloadFile(fileId, fileKeyBase64 = null) {
 			throw new Error('File not found in keychain. You may need a share link to access this file.');
 		}
 
-		// Download file (works with or without authentication)
-		const url = `${API_BASE}/file/${fileId}`;
-		const headers = {};
-		// Only add auth token if logged in (allows unauthenticated shared access)
-		if (session.token) {
-			headers['Authorization'] = `Bearer ${session.token}`;
+		// Download and decrypt file (v2 format) with streaming
+		const { filename, content } = await downloadAndDecryptFile(fileId, fileKey, true);
+
+		// If content is null, file was already saved to disk via File System Access API
+		if (content === null) {
+			showSuccess('filesSuccess', `Downloaded "${filename}"`);
+			return;
 		}
 
-		const response = await fetch(url, { headers });
-		if (!response.ok) {
-			throw new Error(`Failed to download file: ${response.status}`);
-		}
-
-		const encryptedData = new Uint8Array(await response.arrayBuffer());
-
-		// Decrypt file
-		const { filename, content } = await decryptFile(encryptedData, fileKey);
-
-		// Trigger download
+		// Fallback for browsers without File System Access API: trigger download via blob URL
 		const blob = new Blob([content]);
 		const blobUrl = URL.createObjectURL(blob);
 		const a = document.createElement('a');
