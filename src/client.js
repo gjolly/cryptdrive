@@ -556,6 +556,7 @@ async function loadFiles() {
 			files.forEach((file) => {
 				const fileInfo = session.keychain.files[file.file_id] || {};
 				const filename = fileInfo.filename || file.file_id;
+				const fileSize = fileInfo.size || 0;
 
 				const fileItem = document.createElement('div');
 				fileItem.className = 'file-item';
@@ -565,7 +566,7 @@ async function loadFiles() {
 				const nameStrong = document.createElement('strong');
 				nameStrong.textContent = filename;
 				const sizeSmall = document.createElement('small');
-				sizeSmall.textContent = ` (${formatBytes(file.size)})`;
+				sizeSmall.textContent = ` (${formatBytes(fileSize)})`;
 				infoDiv.appendChild(nameStrong);
 				infoDiv.appendChild(sizeSmall);
 
@@ -610,11 +611,6 @@ async function uploadFile(file, fileKey, fileId = null, filename = null) {
 		// Create new file metadata record on the server
 		const createResp = await apiCall('/file', {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				total_size: file.size,
-				total_chunks: totalChunks, // Number of actual parts (metadata+chunk0 is part 1, then chunks 1..N-1)
-			}),
 		});
 		if (!createResp.ok) {
 			throw new Error('Failed to create file on server');

@@ -697,12 +697,12 @@ describe('CryptDrive Worker', () => {
 			const myOwnerHash = await computeOwnerHashForTest(testUserId, env);
 			const otherOwnerHash = await computeOwnerHashForTest(otherUserData.user_id, env);
 
-			await env.DB.prepare('INSERT INTO files (file_id, owner_hash, size, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-				.bind(myFileId, myOwnerHash, 1111, '2026-02-03T10:00:00Z', '2026-02-03T10:00:00Z')
+			await env.DB.prepare('INSERT INTO files (file_id, owner_hash, created_at, updated_at) VALUES (?, ?, ?, ?)')
+				.bind(myFileId, myOwnerHash, '2026-02-03T10:00:00Z', '2026-02-03T10:00:00Z')
 				.run();
 
-			await env.DB.prepare('INSERT INTO files (file_id, owner_hash, size, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-				.bind(otherFileId, otherOwnerHash, 2222, '2026-02-03T10:00:00Z', '2026-02-03T10:00:00Z')
+			await env.DB.prepare('INSERT INTO files (file_id, owner_hash, created_at, updated_at) VALUES (?, ?, ?, ?)')
+				.bind(otherFileId, otherOwnerHash, '2026-02-03T10:00:00Z', '2026-02-03T10:00:00Z')
 				.run();
 
 			// Query with first user's token
