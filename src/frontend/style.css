@@ -7,6 +7,15 @@ main {
 	margin: 0 auto;
 }
 
+/* Constrain auth forms and landing page on desktop */
+#landingPage,
+#registerPage,
+#loginPage {
+	max-width: 450px;
+	margin-left: auto;
+	margin-right: auto;
+}
+
 .hidden {
 	display: none;
 }
@@ -267,6 +276,28 @@ details summary {
 	font-weight: 600;
 }
 
+/* Constrain upload form on desktop */
+details form {
+	max-width: 450px;
+	margin-left: auto;
+	margin-right: auto;
+}
+
+/* Button sizing improvements */
+button {
+	padding: 0.625rem 1.25rem !important;
+	font-size: 1rem !important;
+}
+
+/* Button group spacing */
+[role='group'] {
+	gap: 0.75rem;
+}
+
+[role='group'] button {
+	margin: 0 !important;
+}
+
 /* Landing page buttons */
 #landingPage {
 	text-align: center;
@@ -285,6 +316,17 @@ details summary {
 
 	header h1 {
 		font-size: 1.75rem;
+	}
+
+	/* Full width sections on mobile */
+	#landingPage,
+	#registerPage,
+	#loginPage {
+		max-width: 100%;
+	}
+
+	details form {
+		max-width: 100%;
 	}
 
 	[role='group'] {

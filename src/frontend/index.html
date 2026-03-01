@@ -74,19 +74,16 @@
 
 			<!-- Files Page -->
 			<section id="filesPage" class="hidden">
-				<hgroup>
-					<h2>Your Files</h2>
-					<p>
-						<button onclick="logout()" class="secondary outline">Logout</button>
-					</p>
-				</hgroup>
+				<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem">
+					<button onclick="logout()" class="secondary outline">Logout</button>
+					<button onclick="toggleUploadForm()" id="uploadToggleBtn">📤 Upload New File</button>
+				</div>
 
 				<div id="filesSuccess" class="success hidden"></div>
 				<div id="filesError" class="error hidden"></div>
 
 				<!-- Upload Form -->
-				<details>
-					<summary>📤 Upload New File</summary>
+				<article id="uploadFormSection" class="hidden">
 					<form onsubmit="handleUpload(event)">
 						<label for="fileInput">
 							Choose File
@@ -99,7 +96,7 @@
 							<div id="uploadProgressFill" class="progress-fill" style="width: 0%">0%</div>
 						</div>
 					</div>
-				</details>
+				</article>
 
 				<!-- Files List -->
 				<div id="filesLoading" class="loading hidden">Loading files...</div>
@@ -158,6 +155,12 @@
 				if (icon) {
 					icon.textContent = theme === 'light' ? '🌙' : '☀️';
 				}
+			}
+
+			// Toggle upload form visibility
+			function toggleUploadForm() {
+				const uploadSection = document.getElementById('uploadFormSection');
+				uploadSection.classList.toggle('hidden');
 			}
 
 			// Initialize theme immediately
