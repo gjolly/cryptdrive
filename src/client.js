@@ -871,10 +871,12 @@ async function handleUpload(event) {
 async function downloadFile(fileId, fileKeyBase64 = null) {
 	try {
 		let fileKey;
+		let isSharedLink = false;
 
 		// Check if file key provided (from shared link)
 		if (fileKeyBase64) {
 			fileKey = base64ToArray(fileKeyBase64);
+			isSharedLink = true;
 		} else if (session.keychain && session.keychain.files[fileId]) {
 			// Get file key from keychain (for logged-in owner)
 			const fileInfo = session.keychain.files[fileId];
@@ -893,28 +895,36 @@ async function downloadFile(fileId, fileKeyBase64 = null) {
 		}
 
 		// Fallback for browsers without File System Access API: trigger download via blob URL
-		// Open viewable types in new tab, download others
 		const VIEWABLE_TYPES = ['text/plain', 'application/pdf', 'application/json', 'image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 		const blob = new Blob([content], { type: contentType });
 		const blobUrl = URL.createObjectURL(blob);
 
 		if (VIEWABLE_TYPES.includes(contentType)) {
-			// Open in new tab for viewing
-			const a = document.createElement('a');
-			a.href = blobUrl;
-			a.target = '_blank';
-			a.rel = 'noopener noreferrer'; // Prevents opener access from the start
-			a.click();
-			showSuccess('filesSuccess', `Opened "${filename}" in new tab`);
-			// Give the browser some time to open the tab before revoking the URL
-			setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+			if (isSharedLink) {
+				// For shared links: navigate to the file directly (replaces current page)
+				window.location.href = blobUrl;
+			} else {
+				// For regular downloads: open in new tab
+				const a = document.createElement('a');
+				a.href = blobUrl;
+				a.target = '_blank';
+				a.rel = 'noopener noreferrer';
+				a.click();
+				showSuccess('filesSuccess', `Opened "${filename}" in new tab`);
+				// Note: Don't revoke immediately as tab needs time to load
+				setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+			}
 		} else {
+			// Non-viewable files: trigger download (works for both shared and regular)
 			const a = document.createElement('a');
 			a.href = blobUrl;
 			a.download = filename;
 			a.click();
-			URL.revokeObjectURL(blobUrl);
-			showSuccess('filesSuccess', `Downloaded "${filename}"`);
+			// Clean up after brief delay to ensure download starts
+			setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+			if (!isSharedLink) {
+				showSuccess('filesSuccess', `Downloaded "${filename}"`);
+			}
 		}
 	} catch (error) {
 		showError('filesError', error.message);
@@ -988,9 +998,7 @@ window.generateShareLink = generateShareLink;
 			// Clear the hash from URL for privacy (without reloading page)
 			history.replaceState(null, '', window.location.pathname + window.location.search);
 
-			// Show a message and download the shared file
-			showSection('landingPage');
-			showSuccess('landingPage', 'Downloading shared file...');
+			// Download/view the shared file (will navigate away if viewable, stay if download)
 			await downloadFile(fileId, fileKeyBase64);
 			return;
 		}
