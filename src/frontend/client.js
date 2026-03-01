@@ -186,6 +186,8 @@ async function apiCall(endpoint, options = {}) {
 async function handleRegister(event) {
 	event.preventDefault();
 	const btn = document.getElementById('registerBtn');
+	const form = document.getElementById('registerForm');
+	const loading = document.getElementById('registerLoading');
 	btn.disabled = true;
 	btn.textContent = 'Creating...';
 
@@ -196,6 +198,10 @@ async function handleRegister(event) {
 		// generate a random salt for this user
 		const saltBytes = crypto.getRandomValues(new Uint8Array(16));
 		const salt = arrayToBase64(saltBytes);
+
+		// Show loading indicator and hide form during registration
+		form.classList.add('hidden');
+		loading.classList.remove('hidden');
 
 		// Derive keys
 		const keys = await deriveKeys(passphrase, salt);
@@ -235,6 +241,10 @@ async function handleRegister(event) {
 		// Save session to sessionStorage
 		saveSession();
 	} catch (error) {
+		const form = document.getElementById('registerForm');
+		const loading = document.getElementById('registerLoading');
+		loading.classList.add('hidden');
+		form.classList.remove('hidden');
 		showError('registerError', error.message);
 		btn.disabled = false;
 		btn.textContent = 'Create Account';
@@ -250,6 +260,8 @@ async function handleLogin(event) {
 
 async function performLogin(username, passphrase) {
 	const btn = document.getElementById('loginBtn');
+	const form = document.getElementById('loginForm');
+	const loading = document.getElementById('loginLoading');
 	if (btn) {
 		btn.disabled = true;
 		btn.textContent = 'Logging in...';
@@ -278,8 +290,15 @@ async function performLogin(username, passphrase) {
 			throw new Error('Invalid challenge format: missing salt or user_id');
 		}
 
+		// Show loading indicator and hide form during key derivation and login
+		if (form && loading) {
+			form.classList.add('hidden');
+			loading.classList.remove('hidden');
+		}
+
 		// Derive keys
 		const keys = await deriveKeys(passphrase, salt);
+
 		session.privateKey = keys.privateKey;
 		session.publicKey = keys.publicKey;
 		session.keychainKey = keys.keychainKey;
@@ -310,6 +329,12 @@ async function performLogin(username, passphrase) {
 
 		showSection('filesPage');
 	} catch (error) {
+		const form = document.getElementById('loginForm');
+		const loading = document.getElementById('loginLoading');
+		if (form && loading) {
+			loading.classList.add('hidden');
+			form.classList.remove('hidden');
+		}
 		showError('loginError', error.message);
 		if (btn) {
 			btn.disabled = false;

@@ -38,7 +38,13 @@
 			<section id="registerPage" class="hidden">
 				<h2>Create Account</h2>
 				<div id="registerError" class="error hidden"></div>
-				<form onsubmit="handleRegister(event)">
+				<div id="registerLoading" class="loading hidden">
+					<div aria-busy="true">Creating your secure account...</div>
+					<p style="font-size: 0.875rem; opacity: 0.8; margin-top: 0.5rem">
+						Deriving encryption keys and setting up your encrypted vault. This takes a few seconds to ensure maximum security.
+					</p>
+				</div>
+				<form onsubmit="handleRegister(event)" id="registerForm">
 					<label for="regUsername">
 						Username
 						<input type="text" id="regUsername" required autocomplete="username" placeholder="Choose a username" />
@@ -60,7 +66,13 @@
 			<section id="loginPage" class="hidden">
 				<h2>Login</h2>
 				<div id="loginError" class="error hidden"></div>
-				<form onsubmit="handleLogin(event)">
+				<div id="loginLoading" class="loading hidden">
+					<div aria-busy="true">Securely logging you in...</div>
+					<p style="font-size: 0.875rem; opacity: 0.8; margin-top: 0.5rem">
+						Deriving encryption keys and loading your files. This takes a few seconds to ensure maximum security.
+					</p>
+				</div>
+				<form onsubmit="handleLogin(event)" id="loginForm">
 					<label for="loginUsername">
 						Username
 						<input type="text" id="loginUsername" required autocomplete="username" placeholder="Your username" />
