@@ -553,46 +553,100 @@ async function loadFiles() {
 		if (files.length === 0) {
 			filesList.innerHTML = '<p>No files yet. Upload your first file!</p>';
 		} else {
-			files.forEach((file) => {
+			// Sort files by creation date (newest first)
+			const sortedFiles = files.sort((a, b) => {
+				const dateA = session.keychain.files[a.file_id]?.created || '';
+				const dateB = session.keychain.files[b.file_id]?.created || '';
+				return dateB.localeCompare(dateA);
+			});
+
+			// Create table
+			const table = document.createElement('table');
+			table.className = 'files-table';
+
+			// Create table header
+			const thead = document.createElement('thead');
+			const headerRow = document.createElement('tr');
+			['Name', 'Created', 'Size', 'Actions'].forEach(text => {
+				const th = document.createElement('th');
+				th.textContent = text;
+				headerRow.appendChild(th);
+			});
+			thead.appendChild(headerRow);
+			table.appendChild(thead);
+
+			// Create table body
+			const tbody = document.createElement('tbody');
+			sortedFiles.forEach((file) => {
 				const fileInfo = session.keychain.files[file.file_id] || {};
 				const filename = fileInfo.filename || file.file_id;
 				const fileSize = fileInfo.size || 0;
+				const created = fileInfo.created ? new Date(fileInfo.created).toLocaleString() : 'Unknown';
 
-				const fileItem = document.createElement('div');
-				fileItem.className = 'file-item';
+				const row = document.createElement('tr');
 
-				// Create info div with filename and size (using textContent to prevent XSS)
-				const infoDiv = document.createElement('div');
-				const nameStrong = document.createElement('strong');
-				nameStrong.textContent = filename;
-				const sizeSmall = document.createElement('small');
-				sizeSmall.textContent = ` (${formatBytes(fileSize)})`;
-				infoDiv.appendChild(nameStrong);
-				infoDiv.appendChild(sizeSmall);
+				// Add click handler for mobile (show dialog instead of inline buttons)
+				if (window.innerWidth <= 768) {
+					row.onclick = (e) => {
+						// Prevent triggering if clicking on action buttons
+						if (e.target.tagName === 'BUTTON') return;
+						showFileActionsDialog(file.file_id, filename);
+					};
+				}
 
-				// Create actions div with buttons
+				// Name column (includes size and created as data attributes for mobile)
+				const nameCell = document.createElement('td');
+				nameCell.setAttribute('data-size', formatBytes(fileSize));
+				nameCell.setAttribute('data-created', created);
+				const nameSpan = document.createElement('span');
+				nameSpan.className = 'file-name';
+				nameSpan.textContent = filename;
+				nameCell.appendChild(nameSpan);
+				row.appendChild(nameCell);
+
+				// Created column
+				const dateCell = document.createElement('td');
+				const dateSpan = document.createElement('span');
+				dateSpan.className = 'file-date';
+				dateSpan.textContent = created;
+				dateCell.appendChild(dateSpan);
+				row.appendChild(dateCell);
+
+				// Size column
+				const sizeCell = document.createElement('td');
+				sizeCell.textContent = formatBytes(fileSize);
+				row.appendChild(sizeCell);
+
+				// Actions column
+				const actionsCell = document.createElement('td');
 				const actionsDiv = document.createElement('div');
-				const shareBtn = document.createElement('button');
-				shareBtn.textContent = 'Share';
-				shareBtn.onclick = () => generateShareLink(file.file_id);
+				actionsDiv.className = 'actions';
 
 				const downloadBtn = document.createElement('button');
-				downloadBtn.textContent = 'Download';
+				downloadBtn.textContent = '⬇';
+				downloadBtn.title = 'Download';
 				downloadBtn.onclick = () => downloadFile(file.file_id);
 
+				const shareBtn = document.createElement('button');
+				shareBtn.textContent = '🔗';
+				shareBtn.title = 'Share';
+				shareBtn.onclick = () => generateShareLink(file.file_id);
+
 				const deleteBtn = document.createElement('button');
-				deleteBtn.textContent = 'Delete';
-				deleteBtn.className = 'danger';
+				deleteBtn.textContent = '🗑';
+				deleteBtn.title = 'Delete';
 				deleteBtn.onclick = () => deleteFile(file.file_id);
-				actionsDiv.appendChild(deleteBtn);
 
-				actionsDiv.appendChild(shareBtn);
 				actionsDiv.appendChild(downloadBtn);
+				actionsDiv.appendChild(shareBtn);
+				actionsDiv.appendChild(deleteBtn);
+				actionsCell.appendChild(actionsDiv);
+				row.appendChild(actionsCell);
 
-				fileItem.appendChild(infoDiv);
-				fileItem.appendChild(actionsDiv);
-				filesList.appendChild(fileItem);
+				tbody.appendChild(row);
 			});
+			table.appendChild(tbody);
+			filesList.appendChild(table);
 		}
 	} catch (error) {
 		showError('filesError', error.message);
@@ -809,6 +863,11 @@ async function deleteFile(fileId) {
 		// Remove from keychain
 		delete session.keychain.files[fileId];
 
+		// Update keychain on server
+		const keychainJson = JSON.stringify(session.keychain);
+		const keychainBlob = new Blob([keychainJson]);
+		await uploadFile(keychainBlob, session.keychainKey, session.keychainId, 'keychain.json');
+
 		showSuccess('filesSuccess', 'File deleted successfully');
 		await loadFiles();
 	} catch (error) {
@@ -914,6 +973,53 @@ function formatBytes(bytes) {
 	return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
 
+function showFileActionsDialog(fileId, filename) {
+	const dialog = document.getElementById('fileActionsDialog');
+	const title = document.getElementById('fileActionsTitle');
+	
+	// Set dialog title
+	title.textContent = filename;
+
+	// Remove old event listeners by cloning the dialog buttons
+	const downloadBtn = document.getElementById('dialogDownloadBtn');
+	const shareBtn = document.getElementById('dialogShareBtn');
+	const deleteBtn = document.getElementById('dialogDeleteBtn');
+	const cancelBtn = document.getElementById('dialogCancelBtn');
+
+	const newDownloadBtn = downloadBtn.cloneNode(true);
+	const newShareBtn = shareBtn.cloneNode(true);
+	const newDeleteBtn = deleteBtn.cloneNode(true);
+	const newCancelBtn = cancelBtn.cloneNode(true);
+
+	downloadBtn.replaceWith(newDownloadBtn);
+	shareBtn.replaceWith(newShareBtn);
+	deleteBtn.replaceWith(newDeleteBtn);
+	cancelBtn.replaceWith(newCancelBtn);
+
+	// Add new handlers
+	newDownloadBtn.addEventListener('click', () => {
+		dialog.close();
+		downloadFile(fileId);
+	});
+
+	newShareBtn.addEventListener('click', () => {
+		dialog.close();
+		generateShareLink(fileId);
+	});
+
+	newDeleteBtn.addEventListener('click', () => {
+		dialog.close();
+		deleteFile(fileId);
+	});
+
+	newCancelBtn.addEventListener('click', () => {
+		dialog.close();
+	});
+
+	// Show dialog
+	dialog.showModal();
+}
+
 async function generateShareLink(fileId) {
 	// First we need to call the API to make the file publically accessible
 	// (without authentication) so that the download URL can be accessed by
@@ -961,7 +1067,9 @@ window.handleLogin = handleLogin;
 window.logout = logout;
 window.handleUpload = handleUpload;
 window.downloadFile = downloadFile;
+window.deleteFile = deleteFile;
 window.generateShareLink = generateShareLink;
+window.showFileActionsDialog = showFileActionsDialog;
 
 // Check if user is already logged in on page load
 (async function checkSession() {
