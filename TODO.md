@@ -1,11 +1,11 @@
-- Steam encryption process to avoid loading large files into memory
 - Enforce file size limits on uploads and quota limits based on user tier
-- Redirect to R2 signed URLs for uploads and downloads instead of proxying through the worker
 - Show tier 0 (free) limitations in the UI - especially the retention period for 24h
 - Review the use of the public key vs user ID in the authentication and rate limiting logic to ensure consistency and security
-- Only allow unauthenticated file download for files that have been shared to avoid listing attacks
 - Allow users to delete their account and all associated data
 - Don't use "CREATE TABLE IF NOT EXISTS" on every request, create the table during a setup phase or check for its existence in a more efficient way
 - User better rate limiting, probably involving CAPTCHAs for unauthenticated endpoints
 - Add tests for positive /auth/token and replay attacks
 - Fix test slowness due to reliance on R2.
+- Fix CI failures due to connection to R2
+- Add loading indicators when derivating keys, etc... to notify users of ongoing processes
+- Improve the UI for shared links. These users should never see the landing page but something more generic "Download starting..." and "Download started..."
