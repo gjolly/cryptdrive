@@ -567,7 +567,7 @@ async function loadFiles() {
 			// Create table header
 			const thead = document.createElement('thead');
 			const headerRow = document.createElement('tr');
-			['Name', 'Created', 'Size', 'Actions'].forEach(text => {
+			['Name', 'Created', 'Size', 'Actions'].forEach((text) => {
 				const th = document.createElement('th');
 				th.textContent = text;
 				headerRow.appendChild(th);
@@ -976,7 +976,7 @@ function formatBytes(bytes) {
 function showFileActionsDialog(fileId, filename) {
 	const dialog = document.getElementById('fileActionsDialog');
 	const title = document.getElementById('fileActionsTitle');
-	
+
 	// Set dialog title
 	title.textContent = filename;
 

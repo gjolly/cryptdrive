@@ -1,6 +1,6 @@
 import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
-import worker from '../src';
+import worker from '../';
 
 const v1ApiPrefix = 'api/v1';
 
