@@ -401,7 +401,7 @@ async function downloadAndDecryptFile(fileId, fileKey, triggerDownload = false) 
 		throw new Error('Invalid or unsupported file format');
 	}
 
-	const { totalChunks, originalSize, chunkSize, filename } = metadata;
+	const { totalChunks, originalSize, chunkSize, filename, contentType } = metadata;
 
 	// Remove header from buffer
 	buffer = buffer.slice(HEADER_SIZE);
@@ -496,7 +496,7 @@ async function downloadAndDecryptFile(fileId, fileKey, triggerDownload = false) 
 	// Close writable stream if we used it
 	if (writable) {
 		await writable.close();
-		return { filename, content: null }; // Content already written to disk
+		return { filename, content: null, contentType: contentType || 'application/octet-stream' }; // Content already written to disk
 	}
 
 	// Fallback: combine chunks in memory
@@ -507,7 +507,7 @@ async function downloadAndDecryptFile(fileId, fileKey, triggerDownload = false) 
 		combineOffset += chunk.length;
 	}
 
-	return { filename, content: combined };
+	return { filename, content: combined, contentType: contentType || 'application/octet-stream' };
 }
 
 async function loadFiles() {
@@ -658,6 +658,7 @@ async function uploadFile(file, fileKey, fileId = null, filename = null) {
 		filename: filename || file.name || 'file',
 		originalSize: file.size,
 		totalChunks,
+		contentType: file.type || 'application/octet-stream',
 	};
 	const metadataJson = JSON.stringify(metadata);
 	const metadataBytes = encoder.encode(metadataJson);
@@ -883,7 +884,7 @@ async function downloadFile(fileId, fileKeyBase64 = null) {
 		}
 
 		// Download and decrypt file (v2 format) with streaming
-		const { filename, content } = await downloadAndDecryptFile(fileId, fileKey, true);
+		const { filename, content, contentType } = await downloadAndDecryptFile(fileId, fileKey, true);
 
 		// If content is null, file was already saved to disk via File System Access API
 		if (content === null) {
@@ -892,15 +893,29 @@ async function downloadFile(fileId, fileKeyBase64 = null) {
 		}
 
 		// Fallback for browsers without File System Access API: trigger download via blob URL
-		const blob = new Blob([content]);
+		// Open viewable types in new tab, download others
+		const VIEWABLE_TYPES = ['text/plain', 'application/pdf', 'application/json', 'image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+		const blob = new Blob([content], { type: contentType });
 		const blobUrl = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = blobUrl;
-		a.download = filename;
-		a.click();
-		URL.revokeObjectURL(blobUrl);
 
-		showSuccess('filesSuccess', `Downloaded "${filename}"`);
+		if (VIEWABLE_TYPES.includes(contentType)) {
+			// Open in new tab for viewing
+			const a = document.createElement('a');
+			a.href = blobUrl;
+			a.target = '_blank';
+			a.rel = 'noopener noreferrer'; // Prevents opener access from the start
+			a.click();
+			showSuccess('filesSuccess', `Opened "${filename}" in new tab`);
+			// Give the browser some time to open the tab before revoking the URL
+			setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+		} else {
+			const a = document.createElement('a');
+			a.href = blobUrl;
+			a.download = filename;
+			a.click();
+			URL.revokeObjectURL(blobUrl);
+			showSuccess('filesSuccess', `Downloaded "${filename}"`);
+		}
 	} catch (error) {
 		showError('filesError', error.message);
 	}
