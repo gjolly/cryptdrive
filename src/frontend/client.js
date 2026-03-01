@@ -1081,7 +1081,8 @@ window.showFileActionsDialog = showFileActionsDialog;
 			// Clear the hash from URL for privacy (without reloading page)
 			history.replaceState(null, '', window.location.pathname + window.location.search);
 
-			// Show a message and download the shared file
+			// Hide initial loading and show landing page with message
+			document.getElementById('initialLoading')?.classList.add('hidden');
 			showSection('landingPage');
 			showSuccess('landingPage', 'Downloading shared file...');
 			await downloadFile(fileId, fileKeyBase64);
@@ -1094,12 +1095,20 @@ window.showFileActionsDialog = showFileActionsDialog;
 		try {
 			// Verify token is still valid by trying to fetch files
 			await loadFiles();
+			// Hide initial loading and show files page
+			document.getElementById('initialLoading')?.classList.add('hidden');
 			showSection('filesPage');
 		} catch {
 			// Token expired or invalid, clear session
 			console.log('Session expired, please login again');
 			sessionStorage.removeItem('cryptdrive_session');
+			// Hide initial loading and show landing page
+			document.getElementById('initialLoading')?.classList.add('hidden');
 			showLanding();
 		}
+	} else {
+		// No session, show landing page
+		document.getElementById('initialLoading')?.classList.add('hidden');
+		showLanding();
 	}
 })();
