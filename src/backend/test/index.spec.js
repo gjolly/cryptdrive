@@ -1,6 +1,7 @@
 import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import worker from '../';
+import { initializeTestDatabase } from './helpers/database.js';
 
 const v1ApiPrefix = 'api/v1';
 
@@ -21,7 +22,10 @@ afterAll(async () => {
 
 describe('CryptDrive Worker', () => {
 	beforeEach(async () => {
-		// Clean up database before each test
+		// Initialize database schema
+		await initializeTestDatabase(env.DB);
+
+		// Clean up data before each test
 		try {
 			await env.DB.prepare('DELETE FROM users').run();
 			await env.DB.prepare('DELETE FROM files').run();
@@ -892,6 +896,9 @@ describe('DELETE /file/:file_id - Delete file', () => {
 	const salt = 'deletesalt';
 
 	beforeEach(async () => {
+		// Initialize database schema
+		await initializeTestDatabase(env.DB);
+
 		// Clean up database before each test
 		try {
 			await env.DB.prepare('DELETE FROM users').run();
@@ -1189,6 +1196,9 @@ async function createAndAuthenticateTestUser() {
 
 describe('Rate Limiting', () => {
 	beforeEach(async () => {
+		// Initialize database schema
+		await initializeTestDatabase(env.DB);
+
 		// Clean up all tables before each test
 		try {
 			await env.DB.prepare('DELETE FROM users').run();

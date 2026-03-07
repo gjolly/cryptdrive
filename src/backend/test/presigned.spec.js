@@ -1,6 +1,7 @@
 import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import worker from '../';
+import { initializeTestDatabase } from './helpers/database.js';
 
 const v1ApiPrefix = 'api/v1';
 
@@ -28,7 +29,10 @@ describe('Presigned URL Tests', () => {
 	const salt = 'deletesalt';
 
 	beforeEach(async () => {
-		// Clean up database before each test
+		// Initialize database schema
+		await initializeTestDatabase(env.DB);
+
+		// Clean up data before each test
 		try {
 			await env.DB.prepare('DELETE FROM users').run();
 			await env.DB.prepare('DELETE FROM files').run();

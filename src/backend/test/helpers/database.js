@@ -1,7 +1,9 @@
 /**
- * Initialize database schema if needed
+ * Test database initialization
+ * This runs the initial schema for test databases
  */
-export async function initializeDatabase(db) {
+
+export async function initializeTestDatabase(db) {
 	// Create users table
 	await db
 		.prepare(
@@ -11,7 +13,8 @@ export async function initializeDatabase(db) {
 			public_key TEXT NOT NULL,
 			username TEXT NOT NULL UNIQUE,
 			created_at TEXT NOT NULL,
-			salt TEXT NOT NULL
+			salt TEXT NOT NULL,
+			subscription_tier INTEGER NOT NULL DEFAULT 0
 		)
 	`
 		)

@@ -7,16 +7,12 @@ import {
 	abortMultipartUpload,
 	validateUploadedParts,
 } from '../utils/multipart.js';
-import { initializeDatabase } from '../db/database.js';
 import { computeOwnerHash } from '../utils/crypto.js';
 import { jsonResponse } from '../utils/response.js';
 import { authenticateRequest } from '../middleware/auth.js';
 import { checkFileOperationRateLimit } from '../middleware/rate-limiting.js';
 
 export const handleCreateMultipartUpload = async (request, env, fileId, corsHeaders) => {
-	// Initialize database
-	await initializeDatabase(env.DB);
-
 	// Authenticate request
 	const { user_id, error, status } = await authenticateRequest(request, env);
 	if (error) {

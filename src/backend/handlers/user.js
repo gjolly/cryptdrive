@@ -1,15 +1,11 @@
 import { jsonResponse } from '../utils/response.js';
 import { checkRegistrationRateLimit } from '../middleware/rate-limiting.js';
 import { computeOwnerHash } from '../utils/crypto.js';
-import { initializeDatabase } from '../db/database.js';
 
 /**
  * Handle POST /user - Create new user
  */
 export async function handleCreateUser(request, env, corsHeaders) {
-	// Initialize database first
-	await initializeDatabase(env.DB);
-
 	// Check registration rate limit
 	const rateLimitCheck = await checkRegistrationRateLimit(request, env);
 	if (!rateLimitCheck.allowed) {

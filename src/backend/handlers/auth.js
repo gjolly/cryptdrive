@@ -1,7 +1,6 @@
 import { createJWT, verifyJWT } from '../utils/jwt.js';
 import { jsonResponse } from '../utils/response.js';
 import { checkAuthRateLimit, recordFailedAuth } from '../middleware/rate-limiting.js';
-import { initializeDatabase } from '../db/database.js';
 import { verifyEd25519Signature } from '../middleware/auth.js';
 
 /**
@@ -32,9 +31,6 @@ export async function handleAuthToken(request, env, corsHeaders) {
 	if (!username || typeof username !== 'string' || username.length < 3 || username.length > 30) {
 		return jsonResponse({ error: 'username is required and must be between 3 and 30 characters' }, 400, corsHeaders);
 	}
-
-	// Initialize database
-	await initializeDatabase(env.DB);
 
 	// Check if user exists
 	const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(username).first();
@@ -120,7 +116,7 @@ export async function handleAuthToken(request, env, corsHeaders) {
 
 	// Issue access token (successful authentication)
 	const accessToken = await createJWT(
-		{ sub: user.user_id },
+		{ sub: user.user_id, subscription_tier: user.subscription_tier },
 		jwtSecret,
 		3600 // 1 hour
 	);

@@ -57,7 +57,7 @@ export async function authenticateRequest(request, env) {
 			return { error: 'Invalid token: missing or invalid user_id', status: 401 };
 		}
 
-		return { user_id: payload.sub };
+		return { user_id: payload.sub, subscription_tier: payload.subscription_tier };
 	} catch (e) {
 		return { error: `Invalid or expired token: ${e.message}`, status: 401 };
 	}

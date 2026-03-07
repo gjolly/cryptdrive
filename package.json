@@ -20,7 +20,11 @@
 		"format:check": "prettier --check .",
 		"check": "npm run lint && npm run format:check && npm run test -- --run",
 		"build": "mkdir -p dist && cp -r src/frontend/index.html src/frontend/style.css dist/ && npm run build:client",
-		"build:client": "cp node_modules/argon2-browser/dist/argon2-bundled.min.js dist/ && esbuild src/frontend/client.js --bundle --outfile=dist/client.js --format=esm --minify --target=es2020"
+		"build:client": "cp node_modules/argon2-browser/dist/argon2-bundled.min.js dist/ && esbuild src/frontend/client.js --bundle --outfile=dist/client.js --format=esm --minify --target=es2020",
+		"migrate:local": "node src/backend/db/migrate-cli.js apply local",
+		"migrate:prod": "node src/backend/db/migrate-cli.js apply prod",
+		"migrate:status:local": "node src/backend/db/migrate-cli.js status local",
+		"migrate:status:prod": "node src/backend/db/migrate-cli.js status prod"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",

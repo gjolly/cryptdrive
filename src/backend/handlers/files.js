@@ -1,7 +1,6 @@
 import { authenticateRequest } from '../middleware/auth.js';
 import { jsonResponse } from '../utils/response.js';
 import { checkFileOperationRateLimit, checkAnonymousDownloadRateLimit } from '../middleware/rate-limiting.js';
-import { initializeDatabase } from '../db/database.js';
 import { computeOwnerHash } from '../utils/crypto.js';
 import { getClient, getDownloadUrl } from '../utils/multipart.js';
 
@@ -22,9 +21,6 @@ export async function handleListFiles(request, env, corsHeaders) {
 	if (!rateLimitCheck.allowed) {
 		return jsonResponse({ error: rateLimitCheck.error }, rateLimitCheck.status, corsHeaders);
 	}
-
-	// Initialize database
-	await initializeDatabase(env.DB);
 
 	// Compute owner hash
 	const owner_hash = await computeOwnerHash(user_id, env);
@@ -48,9 +44,6 @@ export async function handleListFiles(request, env, corsHeaders) {
  * Handle POST /file - Create new file
  */
 export async function handleCreateFile(request, env, corsHeaders) {
-	// Initialize database
-	await initializeDatabase(env.DB);
-
 	// Authenticate request
 	const { user_id, error, status } = await authenticateRequest(request, env);
 	if (error) {
@@ -101,9 +94,6 @@ export async function handleCreateFile(request, env, corsHeaders) {
  * Handle GET /file/:file_id - Get file
  */
 export async function handleGetFile(request, env, corsHeaders, fileId) {
-	// Initialize database
-	await initializeDatabase(env.DB);
-
 	// Check if file exists
 	const file = await env.DB.prepare('SELECT * FROM files WHERE file_id = ?').bind(fileId).first();
 
@@ -155,13 +145,15 @@ export async function handleGetFile(request, env, corsHeaders, fileId) {
  * it's still encrypted and can only be decrypted by someone with the key.
  */
 export async function handlePublishFile(request, env, corsHeaders, fileId) {
-	// Initialize database
-	await initializeDatabase(env.DB);
-
 	// Authenticate request
-	const { user_id, error, status } = await authenticateRequest(request, env);
+	const { user_id, subscription_tier, error, status } = await authenticateRequest(request, env);
 	if (error) {
 		return jsonResponse({ error }, status, corsHeaders);
+	}
+
+	// Check tier, if user is on free tier, they cannot publish files to prevent abuse
+	if (subscription_tier === 0) {
+		return jsonResponse({ error: 'Free users cannot publish files' }, 403, corsHeaders);
 	}
 
 	// Check rate limit (write operation)
@@ -199,9 +191,6 @@ export async function handlePublishFile(request, env, corsHeaders, fileId) {
  * Handle DELETE /file/:file_id - Delete file
  */
 export async function handleDeleteFile(request, env, fileId, corsHeaders) {
-	// Initialize database
-	await initializeDatabase(env.DB);
-
 	// Authenticate request
 	const { user_id, error, status } = await authenticateRequest(request, env);
 	if (error) {

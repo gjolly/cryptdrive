@@ -14,6 +14,7 @@
 		{
 			"binding": "DB",
 			"database_name": "cryptdrive",
+			"database_id": "0e63c5ed-d149-4789-b078-1a744f554c8e",
 		},
 	],
 	"r2_buckets": [
