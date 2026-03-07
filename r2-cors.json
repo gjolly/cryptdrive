@@ -3,7 +3,7 @@
 		{
 			"id": "cryptdrive-frontend",
 			"allowed": {
-				"origins": ["https://cryptdrive.gauthier.workers.dev"],
+				"origins": ["https://cryptdrive.gauthier.workers.dev", "https://cryptdrive.io"],
 				"methods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
 				"headers": ["*"]
 			},

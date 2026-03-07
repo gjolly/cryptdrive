@@ -29,7 +29,7 @@
 		"crons": ["0 3 * * *"],
 	},
 	"vars": {
-		"CORS_ORIGIN": "https://cryptdrive.gauthier.workers.dev",
+		"CORS_ORIGIN": "https://cryptdrive.io",
 		"FILE_BLOCK_SIZE": "5242880", // 5 MB (R2 minimum multipart size)
 		"FILE_MAX_SIZE": "1073741824", // 1 GB
 		"R2_URL": "https://a960ff602ad2d1308406ce5028bc96d4.r2.cloudflarestorage.com",
@@ -49,31 +49,8 @@
 		"watch_dir": "./src",
 		"command": "npm run build",
 	},
-	/**
-	 * Smart Placement
-	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
-	 */
-	// "placement": {  "mode": "smart" }
-	/**
-	 * Bindings
-	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
-	 * databases, object storage, AI inference, real-time communication and more.
-	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
-	 */
-	/**
-	 * Environment Variables
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
-	 * Note: Use secrets to store sensitive data.
-	 * https://developers.cloudflare.com/workers/configuration/secrets/
-	 */
-	// "vars": {  "MY_VARIABLE": "production_value" }
-	/**
-	 * Static Assets
-	 * https://developers.cloudflare.com/workers/static-assets/binding/
-	 */
-	// "assets": {  "directory": "./public/",  "binding": "ASSETS" }
-	/**
-	 * Service Bindings (communicate between multiple Workers)
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
-	 */
+	"route": {
+		"pattern": "cryptdrive.io/*",
+		"zone_id": "f2ef3b776522440e8bbff01a59896fa1",
+	},
 }
