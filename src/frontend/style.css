@@ -1,4 +1,6 @@
-:root {
+/* ── Dark theme (default) ── */
+:root,
+[data-theme='dark'] {
 	--bg: #0a0e14;
 	--bg-card: #0d1117;
 	--bg-input: #111820;
@@ -9,10 +11,46 @@
 	--text-bright: #e6edf3;
 	--green: #39d353;
 	--green-dim: #1a6b2a;
+	--green-hover-text: #0a0e14;
 	--cyan: #58a6ff;
 	--orange: #d29922;
 	--red: #f85149;
 	--purple: #bc8cff;
+	--row-hover: rgba(57, 211, 83, 0.03);
+	--error-bg: rgba(248, 81, 73, 0.08);
+	--error-border: rgba(248, 81, 73, 0.3);
+	--success-bg: rgba(57, 211, 83, 0.08);
+	--success-border: rgba(57, 211, 83, 0.3);
+	--danger-hover-bg: rgba(248, 81, 73, 0.1);
+	--backdrop: rgba(0, 0, 0, 0.6);
+	--scanline: rgba(0, 0, 0, 0.03);
+}
+
+/* ── Light theme ── */
+[data-theme='light'] {
+	--bg: #f0f1f4;
+	--bg-card: #ffffff;
+	--bg-input: #e8eaef;
+	--border: #c8ccd4;
+	--border-focus: #1a7f37;
+	--text: #3b4252;
+	--text-dim: #6b7280;
+	--text-bright: #1a1d24;
+	--green: #1a7f37;
+	--green-dim: #dafbe1;
+	--green-hover-text: #ffffff;
+	--cyan: #0969da;
+	--orange: #9a6700;
+	--red: #cf222e;
+	--purple: #8250df;
+	--row-hover: rgba(26, 127, 55, 0.04);
+	--error-bg: rgba(207, 34, 46, 0.06);
+	--error-border: rgba(207, 34, 46, 0.25);
+	--success-bg: rgba(26, 127, 55, 0.06);
+	--success-border: rgba(26, 127, 55, 0.25);
+	--danger-hover-bg: rgba(207, 34, 46, 0.08);
+	--backdrop: rgba(0, 0, 0, 0.3);
+	--scanline: rgba(0, 0, 0, 0.015);
 }
 
 * {
@@ -37,7 +75,7 @@ body::after {
 	left: 0;
 	right: 0;
 	bottom: 0;
-	background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 0, 0, 0.03) 2px, rgba(0, 0, 0, 0.03) 4px);
+	background: repeating-linear-gradient(0deg, transparent, transparent 2px, var(--scanline) 2px, var(--scanline) 4px);
 	pointer-events: none;
 	z-index: 9999;
 }
@@ -91,6 +129,31 @@ header h1 {
 	color: var(--text-dim);
 	margin-top: 0.35rem;
 	font-weight: 300;
+}
+
+.header-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+}
+
+/* ── Theme Toggle ── */
+.theme-toggle {
+	padding: 0.35rem 0.55rem;
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	color: var(--text-dim);
+	font-family: 'JetBrains Mono', monospace;
+	font-size: 0.7rem;
+	cursor: pointer;
+	transition: all 0.15s;
+	white-space: nowrap;
+}
+
+.theme-toggle:hover {
+	border-color: var(--orange);
+	color: var(--orange);
 }
 
 /* ── Links ── */
@@ -190,7 +253,7 @@ input[type='file']::file-selector-button {
 
 input[type='file']::file-selector-button:hover {
 	background: var(--green);
-	color: var(--bg);
+	color: var(--green-hover-text);
 }
 
 /* ── Buttons ── */
@@ -216,7 +279,7 @@ input[type='file']::file-selector-button:hover {
 
 .btn-primary:hover {
 	background: var(--green);
-	color: var(--bg);
+	color: var(--green-hover-text);
 }
 
 .btn-secondary {
@@ -233,11 +296,11 @@ input[type='file']::file-selector-button:hover {
 .btn-danger {
 	background: transparent;
 	color: var(--red);
-	border-color: rgba(248, 81, 73, 0.3);
+	border-color: var(--error-border);
 }
 
 .btn-danger:hover {
-	background: rgba(248, 81, 73, 0.1);
+	background: var(--danger-hover-bg);
 	border-color: var(--red);
 }
 
@@ -344,7 +407,7 @@ input[type='file']::file-selector-button:hover {
 }
 
 .files-table tbody tr:hover {
-	background: rgba(57, 211, 83, 0.03);
+	background: var(--row-hover);
 }
 
 .file-name {
@@ -400,8 +463,8 @@ input[type='file']::file-selector-button:hover {
 
 /* ── Alerts ── */
 .error {
-	background: rgba(248, 81, 73, 0.08);
-	border: 1px solid rgba(248, 81, 73, 0.3);
+	background: var(--error-bg);
+	border: 1px solid var(--error-border);
 	border-radius: 6px;
 	padding: 0.75rem 1rem;
 	color: var(--red);
@@ -410,8 +473,8 @@ input[type='file']::file-selector-button:hover {
 }
 
 .success {
-	background: rgba(57, 211, 83, 0.08);
-	border: 1px solid rgba(57, 211, 83, 0.3);
+	background: var(--success-bg);
+	border: 1px solid var(--success-border);
 	border-radius: 6px;
 	padding: 0.75rem 1rem;
 	color: var(--green);
@@ -472,7 +535,7 @@ input[type='file']::file-selector-button:hover {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	color: var(--bg);
+	color: var(--green-hover-text);
 	font-weight: 600;
 	font-size: 0.7rem;
 }
@@ -506,7 +569,7 @@ dialog {
 }
 
 dialog::backdrop {
-	background: rgba(0, 0, 0, 0.6);
+	background: var(--backdrop);
 }
 
 dialog h3 {
