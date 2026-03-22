@@ -576,7 +576,7 @@ async function loadFiles() {
 		const files = data.files.filter((f) => f.file_id !== session.keychainId);
 
 		if (files.length === 0) {
-			filesList.innerHTML = '<p>No files yet. Upload your first file!</p>';
+			filesList.innerHTML = '<div class="empty"><div class="empty-icon">~</div><p>No files yet. Upload your first file!</p></div>';
 		} else {
 			// Sort files by creation date (newest first)
 			const sortedFiles = files.sort((a, b) => {
@@ -585,14 +585,17 @@ async function loadFiles() {
 				return dateB.localeCompare(dateA);
 			});
 
-			// Create table
+			// Create table wrapper
+			const tableWrap = document.createElement('div');
+			tableWrap.className = 'files-table-wrap';
+
 			const table = document.createElement('table');
 			table.className = 'files-table';
 
 			// Create table header
 			const thead = document.createElement('thead');
 			const headerRow = document.createElement('tr');
-			['Name', 'Created', 'Size', 'Actions'].forEach((text) => {
+			['Name', 'Created', 'Size', ''].forEach((text) => {
 				const th = document.createElement('th');
 				th.textContent = text;
 				headerRow.appendChild(th);
@@ -611,7 +614,7 @@ async function loadFiles() {
 				const row = document.createElement('tr');
 
 				// Add click handler for mobile (show dialog instead of inline buttons)
-				if (window.innerWidth <= 768) {
+				if (window.innerWidth <= 700) {
 					row.onclick = (e) => {
 						// Prevent triggering if clicking on action buttons
 						if (e.target.tagName === 'BUTTON') return;
@@ -639,7 +642,10 @@ async function loadFiles() {
 
 				// Size column
 				const sizeCell = document.createElement('td');
-				sizeCell.textContent = formatBytes(fileSize);
+				const sizeSpan = document.createElement('span');
+				sizeSpan.className = 'file-size';
+				sizeSpan.textContent = formatBytes(fileSize);
+				sizeCell.appendChild(sizeSpan);
 				row.appendChild(sizeCell);
 
 				// Actions column
@@ -648,17 +654,20 @@ async function loadFiles() {
 				actionsDiv.className = 'actions';
 
 				const downloadBtn = document.createElement('button');
-				downloadBtn.textContent = '⬇';
+				downloadBtn.className = 'btn-icon';
+				downloadBtn.textContent = '↓';
 				downloadBtn.title = 'Download';
 				downloadBtn.onclick = () => downloadFile(file.file_id);
 
 				const shareBtn = document.createElement('button');
-				shareBtn.textContent = '🔗';
+				shareBtn.className = 'btn-icon';
+				shareBtn.textContent = '⤤';
 				shareBtn.title = 'Share';
 				shareBtn.onclick = () => generateShareLink(file.file_id);
 
 				const deleteBtn = document.createElement('button');
-				deleteBtn.textContent = '🗑';
+				deleteBtn.className = 'btn-icon danger';
+				deleteBtn.textContent = '×';
 				deleteBtn.title = 'Delete';
 				deleteBtn.onclick = () => deleteFile(file.file_id);
 
@@ -671,7 +680,8 @@ async function loadFiles() {
 				tbody.appendChild(row);
 			});
 			table.appendChild(tbody);
-			filesList.appendChild(table);
+			tableWrap.appendChild(table);
+			filesList.appendChild(tableWrap);
 		}
 	} catch (error) {
 		showError('filesError', error.message);

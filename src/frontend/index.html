@@ -1,197 +1,164 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>CryptDrive - End-to-End Encrypted Storage</title>
-		<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+		<link
+			href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+			rel="stylesheet"
+		/>
 		<link rel="stylesheet" href="style.css" />
 	</head>
 	<body>
-		<main class="container">
+		<div class="container">
 			<header>
-				<button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle dark mode">
-					<span id="themeIcon">🌙</span>
-				</button>
-				<h1>🔒 CryptDrive</h1>
-				<p>End-to-End Encrypted Storage</p>
+				<div class="logo">
+					<div class="logo-icon">CD</div>
+					<h1>CryptDrive</h1>
+				</div>
+				<div class="subtitle">End-to-end encrypted storage &middot; Zero-knowledge architecture</div>
 			</header>
 
 			<!-- Initial Loading Spinner -->
 			<section id="initialLoading" class="loading">
-				<div aria-busy="true">Loading...</div>
+				<div class="spinner"></div>
+				<div>Authenticating...</div>
 			</section>
 
 			<!-- Landing Page -->
 			<section id="landingPage" class="hidden">
-				<hgroup>
+				<div class="card auth-card">
 					<h2>Welcome</h2>
 					<p>Your files, encrypted on your device. The server never sees your data.</p>
-				</hgroup>
-				<div role="group">
-					<button onclick="showRegister()">Create Account</button>
-					<button onclick="showLogin()" class="secondary">Login</button>
+					<div class="landing-actions btn-group">
+						<button class="btn btn-primary" onclick="showRegister()">Create Account</button>
+						<button class="btn btn-secondary" onclick="showLogin()">Login</button>
+					</div>
 				</div>
 			</section>
 
 			<!-- Register Page -->
 			<section id="registerPage" class="hidden">
-				<h2>Create Account</h2>
-				<div id="registerError" class="error hidden"></div>
-				<div id="registerLoading" class="loading hidden">
-					<div aria-busy="true">Creating your secure account...</div>
-					<p style="font-size: 0.875rem; opacity: 0.8; margin-top: 0.5rem">
-						Deriving encryption keys and setting up your encrypted vault. This takes a few seconds to ensure maximum security.
-					</p>
-				</div>
-				<form onsubmit="handleRegister(event)" id="registerForm">
-					<label for="regUsername">
-						Username
-						<input type="text" id="regUsername" required autocomplete="username" placeholder="Choose a username" />
-					</label>
-
-					<label for="regPassphrase">
-						Passphrase (min 12 characters)
-						<input type="password" id="regPassphrase" required minlength="12" autocomplete="new-password" placeholder="Strong passphrase" />
-					</label>
-
-					<div role="group">
-						<button type="submit" id="registerBtn">Create Account</button>
-						<button type="button" onclick="showLanding()" class="secondary">Cancel</button>
+				<div class="card auth-card">
+					<h2>Create Account</h2>
+					<div id="registerError" class="error hidden"></div>
+					<div id="registerLoading" class="loading hidden">
+						<div class="spinner"></div>
+						<div>Creating your secure account...</div>
+						<p class="loading-text">
+							Deriving encryption keys and setting up your encrypted vault. This takes a few seconds to ensure maximum security.
+						</p>
 					</div>
-				</form>
+					<form onsubmit="handleRegister(event)" id="registerForm">
+						<label for="regUsername">Username</label>
+						<input type="text" id="regUsername" required autocomplete="username" placeholder="Choose a username" />
+
+						<label for="regPassphrase">Passphrase (min 12 characters)</label>
+						<input type="password" id="regPassphrase" required minlength="12" autocomplete="new-password" placeholder="Strong passphrase" />
+
+						<div class="btn-group">
+							<button type="submit" id="registerBtn" class="btn btn-primary">Create Account</button>
+							<button type="button" onclick="showLanding()" class="btn btn-secondary">Cancel</button>
+						</div>
+					</form>
+				</div>
 			</section>
 
 			<!-- Login Page -->
 			<section id="loginPage" class="hidden">
-				<h2>Login</h2>
-				<div id="loginError" class="error hidden"></div>
-				<div id="loginLoading" class="loading hidden">
-					<div aria-busy="true">Securely logging you in...</div>
-					<p style="font-size: 0.875rem; opacity: 0.8; margin-top: 0.5rem">
-						Deriving encryption keys and loading your files. This takes a few seconds to ensure maximum security.
-					</p>
-				</div>
-				<form onsubmit="handleLogin(event)" id="loginForm">
-					<label for="loginUsername">
-						Username
-						<input type="text" id="loginUsername" required autocomplete="username" placeholder="Your username" />
-					</label>
-
-					<label for="loginPassphrase">
-						Passphrase
-						<input type="password" id="loginPassphrase" required autocomplete="current-password" placeholder="Your passphrase" />
-					</label>
-
-					<div role="group">
-						<button type="submit" id="loginBtn">Login</button>
-						<button type="button" onclick="showLanding()" class="secondary">Cancel</button>
+				<div class="card auth-card">
+					<h2>Login</h2>
+					<div id="loginError" class="error hidden"></div>
+					<div id="loginLoading" class="loading hidden">
+						<div class="spinner"></div>
+						<div>Securely logging you in...</div>
+						<p class="loading-text">
+							Deriving encryption keys and loading your files. This takes a few seconds to ensure maximum security.
+						</p>
 					</div>
-				</form>
+					<form onsubmit="handleLogin(event)" id="loginForm">
+						<label for="loginUsername">Username</label>
+						<input type="text" id="loginUsername" required autocomplete="username" placeholder="Your username" />
+
+						<label for="loginPassphrase">Passphrase</label>
+						<input type="password" id="loginPassphrase" required autocomplete="current-password" placeholder="Your passphrase" />
+
+						<div class="btn-group">
+							<button type="submit" id="loginBtn" class="btn btn-primary">Login</button>
+							<button type="button" onclick="showLanding()" class="btn btn-secondary">Cancel</button>
+						</div>
+					</form>
+				</div>
 			</section>
 
 			<!-- Files Page -->
 			<section id="filesPage" class="hidden">
-				<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem">
-					<button onclick="logout()" class="secondary outline">Logout</button>
-					<button onclick="toggleUploadForm()" id="uploadToggleBtn">📤 Upload New File</button>
+				<div class="files-toolbar">
+					<button onclick="logout()" class="btn btn-secondary">Logout</button>
+					<button onclick="toggleUploadForm()" id="uploadToggleBtn" class="btn btn-primary">Upload File</button>
 				</div>
 
 				<div id="filesSuccess" class="success hidden"></div>
 				<div id="filesError" class="error hidden"></div>
 
 				<!-- Upload Form -->
-				<article id="uploadFormSection" class="hidden">
+				<div id="uploadFormSection" class="card upload-card hidden">
 					<form onsubmit="handleUpload(event)">
-						<label for="fileInput">
-							Choose File
-							<input type="file" id="fileInput" required />
-						</label>
-						<button type="submit" id="uploadBtn">Upload</button>
+						<label for="fileInput">Choose File</label>
+						<input type="file" id="fileInput" required />
+						<button type="submit" id="uploadBtn" class="btn btn-primary">Upload</button>
 					</form>
 					<div id="uploadProgressContainer" class="progress-container hidden">
 						<div class="progress-bar">
 							<div id="uploadProgressFill" class="progress-fill" style="width: 0%">0%</div>
 						</div>
 					</div>
-				</article>
+				</div>
 
 				<!-- Files List -->
-				<div id="filesLoading" class="loading hidden">Loading files...</div>
+				<div id="filesLoading" class="loading hidden">
+					<div class="spinner"></div>
+					<div>Loading files...</div>
+				</div>
 				<div id="filesList"></div>
 			</section>
 
 			<!-- File Actions Dialog (for mobile) -->
 			<dialog id="fileActionsDialog">
-				<article>
-					<h3 id="fileActionsTitle"></h3>
-					<nav>
-						<ul>
-							<li><button id="dialogDownloadBtn" class="secondary">⬇ Download</button></li>
-							<li><button id="dialogShareBtn" class="secondary">🔗 Share Link</button></li>
-							<li><button id="dialogDeleteBtn" class="contrast">🗑 Delete</button></li>
-						</ul>
-					</nav>
-					<footer>
-						<button id="dialogCancelBtn" class="secondary">Cancel</button>
-					</footer>
-				</article>
+				<h3 id="fileActionsTitle"></h3>
+				<nav>
+					<ul>
+						<li><button id="dialogDownloadBtn" class="btn btn-secondary">Download</button></li>
+						<li><button id="dialogShareBtn" class="btn btn-secondary">Share Link</button></li>
+						<li><button id="dialogDeleteBtn" class="btn btn-danger">Delete</button></li>
+					</ul>
+				</nav>
+				<footer>
+					<button id="dialogCancelBtn" class="btn btn-secondary">Cancel</button>
+				</footer>
 			</dialog>
 
-			<footer>
+			<footer class="site-footer">
 				<p>All encryption happens in your browser. Your data is never exposed to the server.</p>
 				<p>
-					© 2026 Gauthier Jolly -
+					&copy; 2026 Gauthier Jolly &mdash;
 					<a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0 License</a>
 				</p>
-				<p>View on <a href="https://github.com/gjolly/cryptdrive" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+				<p>
+					View on
+					<a href="https://github.com/gjolly/cryptdrive" target="_blank" rel="noopener noreferrer">GitHub</a>
+				</p>
 			</footer>
-		</main>
+		</div>
 
-		<!-- Theme Script (runs before page content loads) -->
+		<!-- Theme Script -->
 		<script>
-			// Initialize theme from localStorage or system preference
-			function initTheme() {
-				const savedTheme = localStorage.getItem('theme');
-				const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-				const theme = savedTheme || (prefersDark ? 'dark' : 'light');
-				document.documentElement.setAttribute('data-theme', theme);
-				updateThemeIcon(theme);
-			}
-
-			function toggleTheme() {
-				const html = document.documentElement;
-				const currentTheme = html.getAttribute('data-theme');
-				const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-				html.setAttribute('data-theme', newTheme);
-				localStorage.setItem('theme', newTheme);
-				updateThemeIcon(newTheme);
-			}
-
-			function updateThemeIcon(theme) {
-				const icon = document.getElementById('themeIcon');
-				if (icon) {
-					icon.textContent = theme === 'light' ? '🌙' : '☀️';
-				}
-			}
-
 			// Toggle upload form visibility
 			function toggleUploadForm() {
 				const uploadSection = document.getElementById('uploadFormSection');
 				uploadSection.classList.toggle('hidden');
 			}
-
-			// Initialize theme immediately
-			initTheme();
-
-			// Listen for system theme changes
-			window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-				if (!localStorage.getItem('theme')) {
-					const theme = e.matches ? 'dark' : 'light';
-					document.documentElement.setAttribute('data-theme', theme);
-					updateThemeIcon(theme);
-				}
-			});
 		</script>
 
 		<!-- Crypto Libraries -->
