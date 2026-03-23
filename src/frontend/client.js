@@ -1059,9 +1059,14 @@ async function generateShareLink(fileId) {
 	// First we need to call the API to make the file publically accessible
 	// (without authentication) so that the download URL can be accessed by
 	// anyone with the link
-	const response = await apiCall(`/file/${fileId}/publish`, { method: 'POST' });
-	if (!response.ok) {
-		showError('filesError', 'Failed to publish file for sharing');
+	try {
+		await apiCall(`/file/${fileId}/publish`, { method: 'POST' });
+	} catch (error) {
+		if (error.message === 'Free users cannot publish files') {
+			showError('filesError', 'Sharing files not allowed on your account.');
+		} else {
+			showError('filesError', 'Failed to publish file for sharing');
+		}
 		return;
 	}
 
